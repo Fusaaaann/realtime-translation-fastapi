@@ -170,3 +170,5 @@ hf_download/
 
 .vscode
 admin_config.json
+*.wav
+*.aac

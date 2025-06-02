@@ -1,10 +1,15 @@
 import pytest
 
 def pytest_addoption(parser):
-    print("added option --use-dummy-mic")
     parser.addoption(
-        "--use-dummy-mic",
+        "--use-real-mic",
         action="store_true",
         default=False,
-        help="Use dummy microphone data instead of the real audio source."
+        help="Use real audio source instead of the dummy microphone data."
+    )
+    parser.addoption(
+        "--use-real-api",
+        action="store_true",
+        default=False,
+        help="Call third party api instead of returning mocked data."
     )
