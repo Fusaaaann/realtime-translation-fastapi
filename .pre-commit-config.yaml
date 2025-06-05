@@ -6,6 +6,7 @@ repos:
       args:
       - --max-line-length=150
       - --max-complexity=60
+      - --ignore=E203,W503,E501
 - repo: https://github.com/psf/black
   rev: 25.1.0  # Use the specific revision or tag you want to pin to
   hooks:
