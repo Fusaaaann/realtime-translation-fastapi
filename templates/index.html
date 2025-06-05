@@ -2,29 +2,87 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Seamless Audio & Caption Playback</title>
-  <style>
-    /* Simple style for the caption display */
-    #caption {
-      font-size: 1.5em;
-      text-align: center;
-      margin-top: 20px;
-      padding: 10px;
-      background: #f4f4f4;
+  <title>Translator</title>
+ <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+      margin: 0;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    
+    .language-selector {
+      margin-bottom: 20px;
+    }
+    
+    #language-dropdown {
+      padding: 8px;
       border-radius: 4px;
-      width: 80%;
-      margin-left: auto;
-      margin-right: auto;
+      border: 1px solid #ccc;
+      font-size: 16px;
+      margin-left: 10px;
+    }
+    
+    .caption-container {
+      background-color: rgba(0, 0, 0, 0.7);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      min-height: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .caption-text {
+      color: white;
+      font-size: 20px;
+      text-align: center;
+      line-height: 1.5;
+      animation: fadeIn 0.5s ease-in-out;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    
+    .instructions {
+      text-align: center;
+      color: #666;
+      font-style: italic;
     }
   </style>
 </head>
 <body>
-  <div id="caption">Captions will appear here</div>
-
+  <div class="container">
+    <div class="language-selector">
+      <label for="language-dropdown">🌐</label>
+      <select id="language-dropdown">
+        {% for language in languages %}
+          <option value="{{ language.code }}" data-waiting="{{ language.messages.waiting }}" data-switching="{{ language.messages.switching }}" data-instructions="{{ language.messages.instructions }}">{{ language.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    
+    <div class="caption-container">
+      <div id="caption" class="caption-text">{{ languages[0].messages.waiting }}</div>
+    </div>
+    
+    <div class="instructions">
+      <p id="instructions-text">{{ languages[0].messages.instructions }}</p>
+    </div>
+  </div>
   <script>
     // Create an AudioContext
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     let nextPlayTime = audioContext.currentTime; // time when the next audio segment should play
+    const apiBaseUrl = "{{ api_base_url }}";
 
     // Polling interval in milliseconds (adjust as needed)
     const pollInterval = 3000;
@@ -32,6 +90,18 @@
     // Maintain last received timestamp so we only fetch new data
     let lastAudioTimestamp = 0;
     let lastCaptionTimestamp = 0;
+    
+    // Get language dropdown element
+    const languageDropdown = document.getElementById('language-dropdown');
+    const captionElement = document.getElementById("caption");
+    const instructionsElement = document.getElementById("instructions-text");
+    
+    /**
+     * Get the currently selected language
+     */
+    function getSelectedLanguage() {
+      return languageDropdown.value;
+    }
 
     /**
      * Poll the /audio/translated-voice endpoint for new audio segments.
@@ -39,8 +109,8 @@
      */
     async function pollAudio() {
       try {
-        // Adjust URL parameters as needed (here we use lang=ENGLISH)
-        const response = await fetch(`/audio/translated-voice?lang=ENGLISH&timestamp=${lastAudioTimestamp}`);
+        const language = getSelectedLanguage();
+        const response = await fetch(`${apiBaseUrl}/audio/translated-voice?lang=${language}&timestamp=${lastAudioTimestamp}`);
         if (!response.ok) {
           throw new Error("Audio fetch error");
         }
@@ -92,8 +162,8 @@
      */
     async function pollCaptions() {
       try {
-        // Adjust URL parameters as needed (here we use lang=ENGLISH)
-        const response = await fetch(`/captions/translated?lang=ENGLISH&timestamp=${lastCaptionTimestamp}`);
+        const language = getSelectedLanguage();
+        const response = await fetch(`${apiBaseUrl}/captions/translated?lang=${language}&timestamp=${lastCaptionTimestamp}`);
         if (!response.ok) {
           throw new Error("Caption fetch error");
         }
@@ -104,7 +174,12 @@
           // For simplicity, display the latest caption.
           const latestCaption = captions[captions.length - 1];
           lastCaptionTimestamp = latestCaption.timestamp;
-          document.getElementById("caption").innerText = latestCaption.text;
+          
+          // Update caption with animation effect
+          captionElement.style.animation = 'none';
+          captionElement.offsetHeight; // Trigger reflow
+          captionElement.style.animation = 'fadeIn 0.5s ease-in-out';
+          captionElement.innerText = latestCaption.text;
         }
       } catch (err) {
         console.error("Error fetching captions:", err);
@@ -120,6 +195,21 @@
         pollCaptions();
       }, pollInterval);
     }
+    
+    /**
+     * Reset timestamps when language changes and update UI text
+     */
+    languageDropdown.addEventListener('change', () => {
+      lastAudioTimestamp = 0;
+      lastCaptionTimestamp = 0;
+      
+      // Get the selected option
+      const selectedOption = languageDropdown.options[languageDropdown.selectedIndex];
+      
+      // Update caption and instructions with localized text
+      captionElement.innerText = selectedOption.dataset.switching;
+      instructionsElement.innerText = selectedOption.dataset.instructions;
+    });
 
     // Resume the AudioContext on user interaction (e.g., a click) since many browsers block audio autoplay.
     document.body.addEventListener('click', () => {

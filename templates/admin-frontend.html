@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Configuration</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="text"], input[type="password"], input[type="number"], select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #message {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+        .info {
+            background-color: #d9edf7;
+            color: #31708f;
+        }
+        .button-group {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        #importInput {
+            display: none;
+        }
+        .collapsible {
+            background-color: #f1f1f1;
+            color: #444;
+            cursor: pointer;
+            padding: 18px;
+            width: 100%;
+            border: none;
+            text-align: left;
+            outline: none;
+            font-size: 15px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .active, .collapsible:hover {
+            background-color: #e0e0e0;
+        }
+        .collapsible:after {
+            content: '\002B';
+            color: #777;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+        .active:after {
+            content: "\2212";
+        }
+        .content {
+            padding: 0 18px;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.2s ease-out;
+            background-color: #f9f9f9;
+            border-radius: 0 0 4px 4px;
+        }
+        .server-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .server-online {
+            background-color: #4CAF50;
+        }
+        .server-offline {
+            background-color: #f44336;
+        }
+        .status-container {
+            display: flex;
+            align-items: center;
+        }
+        .endpoint-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .endpoint-fields {
+            flex-grow: 1;
+            margin-right: 10px;
+        }
+        .endpoint-buttons {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+        }
+        .endpoint-buttons button {
+            margin-bottom: 10px;
+        }
+        .section-header {
+            background-color: #f8f8f8;
+            padding: 10px;
+            margin-top: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #4CAF50;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Admin Configuration</h1>
+
+    <button type="button" class="collapsible">Audio System Status & Control</button>
+    <div class="content">
+        <div id="audioStatusContainer">
+            <div class="form-group">
+                <label>Current Publish Mode:</label>
+                <span id="currentPublishMode">Unknown</span>
+            </div>
+            <div class="form-group">
+                <label>Audio Recorder Status:</label>
+                <span id="audioRecorderStatus">Unknown</span>
+            </div>
+            <div class="form-group">
+                <label>Audio Processor Task:</label>
+                <span id="audioProcessorStatus">Unknown</span>
+            </div>
+            <div class="button-group">
+                <button type="button" id="refreshStatusBtn">Refresh Status</button>
+                <button type="button" id="startAudioBtn">Start Audio</button>
+                <button type="button" id="stopAudioBtn">Stop Audio</button>
+                <button type="button" id="restartAudioBtn">Restart Audio</button>
+            </div>
+        </div>
+    </div>
+
+    <button type="button" class="collapsible">Audio Device Selection</button>
+    <div class="content">
+        <div class="form-group">
+            <label for="availableDevices">Available Audio Input Devices:</label>
+            <select id="availableDevices" name="availableDevices">
+                <option value="">Loading devices...</option>
+            </select>
+            <button type="button" id="refreshDevicesBtn">Refresh Devices</button>
+        </div>
+        <div id="deviceInfo" style="margin-top: 10px; padding: 10px; background-color: #f9f9f9; border-radius: 4px; display: none;">
+            <strong>Device Details:</strong>
+            <div id="deviceDetails"></div>
+        </div>
+    </div>
+    
+    <form id="configForm">
+        <div class="section-header">API Keys</div>
+        <div class="form-group">
+            <label for="elevenlabs_api_key">ElevenLabs API Key:</label>
+            <input type="text" id="elevenlabs_api_key" name="elevenlabs_api_key" value="{{ config.elevenlabs_api_key or '' }}">
+        </div>
+
+        <div class="form-group">
+            <label for="openai_api_key">OpenAI API Key:</label>
+            <input type="text" id="openai_api_key" name="openai_api_key" value="{{ config.openai_api_key or '' }}">
+        </div>
+
+        <div class="section-header">Language Settings</div>
+        <div class="form-group">
+            <label for="default_source_language">Default Source Language:</label>
+            <select id="default_source_language" name="default_source_language">
+                <!--TODO:use jinja placeholder for server to render Language    -->
+                <!-- 
+                    <option value="CHINESE">Chinese</option>
+                    <option value="ENGLISH">English</option>
+                    <option value="THAI">Thai</option>
+                -->
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Target Languages:</label>
+            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <!--TODO:use jinja placeholder for server to render Language     enum-->
+                <!-- <div style="display: flex; align-items: center;">
+                    <input type="checkbox" id="english" value="ENGLISH" {{ 'checked' if 'ENGLISH' in (config.target_languages or []) else '' }}> 
+                    <label for="english" style="margin-left: 5px; display: inline;">English</label>
+                </div> -->
+            </div>
+        </div>
+
+        <div class="section-header">Publishing Settings</div>
+        <div class="form-group">
+            <label for="publish_mode">Publish Mode:</label>
+            <select id="publish_mode" name="publish_mode">
+                <option value="upload" {{ 'selected' if config.publish_mode == 'upload' else '' }}>Upload</option>
+                <option value="local-audio-source" {{ 'selected' if config.publish_mode == 'local-audio-source' else '' }}>Local Audio Source</option>
+            </select>
+        </div>
+
+        <div class="section-header">Model Settings</div>
+        <div class="form-group">
+            <label for="tts_model">Text-to-Speech Model:</label>
+            <select id="tts_model" name="tts_model">
+                <option value="eleven_multilingual_v2" {{ 'selected' if config.tts_model == 'eleven_multilingual_v2' else '' }}>Eleven Multilingual v2</option>
+                <option value="eleven_monolingual_v1" {{ 'selected' if config.tts_model == 'eleven_monolingual_v1' else '' }}>Eleven Monolingual v1</option>
+                <option value="eleven_turbo" {{ 'selected' if config.tts_model == 'eleven_turbo' else '' }}>Eleven Turbo</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="stt_model">Speech-to-Text Model:</label>
+            <select id="stt_model" name="stt_model">
+                <option value="scribe_v1" {{ 'selected' if config.stt_model == 'scribe_v1' else '' }}>Scribe v1</option>
+                <option value="whisper_v1" {{ 'selected' if config.stt_model == 'whisper_v1' else '' }}>Whisper v1</option>
+            </select>
+        </div>
+
+        <div class="section-header">Audio Recording Settings</div>
+        <div class="form-group">
+            <label for="audio_device_id">Audio Device ID (leave empty for default):</label>
+            <input type="text" id="audio_device_id" name="audio_device_id" placeholder="Optional" value="{{ config.audio_device_id or '' }}">
+        </div>
+
+        <div class="form-group">
+            <label for="sample_rate">Sample Rate (Hz):</label>
+            <input type="number" id="sample_rate" name="sample_rate" min="8000" max="96000" value="{{ config.sample_rate or 44100 }}">
+        </div>
+
+        <div class="form-group">
+            <label for="poll_interval">Poll Interval (seconds):</label>
+            <input type="number" id="poll_interval" name="poll_interval" min="1" value="{{ config.poll_interval or 10 }}">
+        </div>
+
+        <div class="form-group">
+            <label for="first_record_seconds">First Record Duration (seconds):</label>
+            <input type="number" id="first_record_seconds" name="first_record_seconds" min="1" value="{{ config.first_record_seconds or 5 }}">
+        </div>
+
+        <div class="form-group">
+            <label for="min_audio_duration">Minimum Audio Duration (seconds):</label>
+            <input type="number" id="min_audio_duration" name="min_audio_duration" min="1" value="{{ config.min_audio_duration or 15 }}">
+        </div>
+
+        <button type="submit">Save Configuration</button>
+    </form>
+
+    <div class="button-group">
+        <button id="exportBtn">Export Configuration</button>
+        <button id="importBtn">Import Configuration</button>
+        <input type="file" id="importInput" accept=".json">
+    </div>
+
+    <div id="message"></div>
+
+    <script>
+        // Global variables for configuration
+        let appConfig = {{ config | tojson }};
+        const apiBaseUrl = "{{ api_base_url }}";
+        const adminToken = "{{ admin_token }}";
+        
+        // Set up collapsible section
+        const coll = document.getElementsByClassName("collapsible");
+        for (let i = 0; i < coll.length; i++) {
+            coll[i].addEventListener("click", function() {
+                this.classList.toggle("active");
+                const content = this.nextElementSibling;
+                if (content.style.maxHeight) {
+                    content.style.maxHeight = null;
+                } else {
+                    content.style.maxHeight = content.scrollHeight + "px";
+                }
+            });
+        }
+        
+        // Get authorization header
+        function getAuthHeader() {
+            return adminToken ? { 'x-admin-token': adminToken } : {};
+        }
+
+        // Audio status and control functions
+        async function refreshAudioStatus() {
+            try {
+                const headers = {
+                    'Accept': 'application/json',
+                    ...getAuthHeader()
+                };
+                
+                const response = await fetch(`${apiBaseUrl}/admin/audio-status`, {
+                    headers: headers
+                });
+                
+                if (response.ok) {
+                    const status = await response.json();
+                    updateAudioStatusDisplay(status);
+                } else {
+                    showMessage('Failed to fetch audio status', 'error');
+                }
+            } catch (error) {
+                console.error('Error fetching audio status:', error);
+                showMessage(`Error fetching audio status: ${error.message}`, 'error');
+            }
+        }
+
+        function updateAudioStatusDisplay(status) {
+            document.getElementById('currentPublishMode').textContent = status.publish_mode || 'Unknown';
+            
+            if (status.audio_recorder) {
+                const recorder = status.audio_recorder;
+                document.getElementById('audioRecorderStatus').innerHTML = 
+                    `Running: ${recorder.running ? '✅' : '❌'} | Device: ${recorder.device_id || 'Default'} | Rate: ${recorder.sample_rate}Hz | Consumers: ${recorder.consumers}`;
+            } else {
+                document.getElementById('audioRecorderStatus').textContent = 'Not initialized';
+            }
+            
+            if (status.audio_processor_task) {
+                const task = status.audio_processor_task;
+                let taskStatus = task.running ? '✅ Running' : '❌ Stopped';
+                if (task.cancelled) taskStatus += ' (Cancelled)';
+                if (task.exception) taskStatus += ` | Error: ${task.exception}`;
+                document.getElementById('audioProcessorStatus').textContent = taskStatus;
+            } else {
+                document.getElementById('audioProcessorStatus').textContent = 'Not running';
+            }
+        }
+
+        async function controlAudioRecorder(action) {
+            try {
+                const headers = {
+                    'Content-Type': 'application/json',
+                    ...getAuthHeader()
+                };
+                
+                const response = await fetch(`${apiBaseUrl}/admin/audio-control?action=${action}`, {
+                    method: 'POST',
+                    headers: headers
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    showMessage(`Audio ${action} ${result.success ? 'successful' : 'failed'}`, result.success ? 'success' : 'error');
+                    if (result.status) {
+                        updateAudioStatusDisplay({ audio_recorder: result.status });
+                    }
+                } else {
+                    showMessage(`Failed to ${action} audio recorder`, 'error');
+                }
+            } catch (error) {
+                console.error(`Error ${action} audio recorder:`, error);
+                showMessage(`Error ${action} audio recorder: ${error.message}`, 'error');
+            }
+        }
+
+        // Audio device functions
+        async function loadAudioDevices() {
+            try {
+                const headers = {
+                    'Accept': 'application/json',
+                    ...getAuthHeader()
+                };
+                
+                const response = await fetch(`${apiBaseUrl}/admin/audio-devices`, {
+                    headers: headers
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    updateDevicesList(data.devices, data.current_device_id);
+                } else {
+                    showMessage('Failed to load audio devices', 'error');
+                }
+            } catch (error) {
+                console.error('Error loading audio devices:', error);
+                showMessage(`Error loading audio devices: ${error.message}`, 'error');
+            }
+        }
+
+        function updateDevicesList(devices, currentDeviceId) {
+            const select = document.getElementById('availableDevices');
+            select.innerHTML = '<option value="">Default Device</option>';
+            
+            devices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.id;
+                option.textContent = `${device.name} (${device.channels} channels, ${device.default_samplerate}Hz)`;
+                if (device.is_default) {
+                    option.textContent += ' [System Default]';
+                }
+                if (device.id == currentDeviceId) {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            });
+        }
+
+        function showDeviceDetails() {
+            const select = document.getElementById('availableDevices');
+            const deviceInfo = document.getElementById('deviceInfo');
+            const deviceDetails = document.getElementById('deviceDetails');
+            
+            if (select.value) {
+                deviceDetails.innerHTML = `
+                    <div>Device ID: ${select.value}</div>
+                    <div>Selected for configuration</div>
+                `;
+                deviceInfo.style.display = 'block';
+                
+                // Update the audio_device_id field
+                document.getElementById('audio_device_id').value = select.value;
+            } else {
+                deviceInfo.style.display = 'none';
+                document.getElementById('audio_device_id').value = '';
+            }
+        }
+
+        // Audio control event listeners
+        document.getElementById('refreshStatusBtn').addEventListener('click', refreshAudioStatus);
+        document.getElementById('startAudioBtn').addEventListener('click', () => controlAudioRecorder('start'));
+        document.getElementById('stopAudioBtn').addEventListener('click', () => controlAudioRecorder('stop'));
+        document.getElementById('restartAudioBtn').addEventListener('click', () => controlAudioRecorder('restart'));
+        document.getElementById('refreshDevicesBtn').addEventListener('click', loadAudioDevices);
+        document.getElementById('availableDevices').addEventListener('change', showDeviceDetails);
+
+        document.getElementById('configForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Get selected target languages
+            const targetLanguages = [];
+            ['english', 'thai', 'chinese', 'vietnamese'].forEach(lang => {
+                if (document.getElementById(lang).checked) {
+                    targetLanguages.push(document.getElementById(lang).value);
+                }
+            });
+
+            // Create configuration object
+            const config = {
+                elevenlabs_api_key: document.getElementById('elevenlabs_api_key').value,
+                openai_api_key: document.getElementById('openai_api_key').value,
+                default_source_language: document.getElementById('default_source_language').value,
+                target_languages: targetLanguages,
+                publish_mode: document.getElementById('publish_mode').value,
+                tts_model: document.getElementById('tts_model').value,
+                stt_model: document.getElementById('stt_model').value,
+                audio_device_id: document.getElementById('audio_device_id').value || null,
+                sample_rate: parseInt(document.getElementById('sample_rate').value, 10),
+                poll_interval: parseInt(document.getElementById('poll_interval').value, 10),
+                first_record_seconds: parseInt(document.getElementById('first_record_seconds').value, 10),
+                min_audio_duration: parseInt(document.getElementById('min_audio_duration').value, 10)
+            };
+
+            // Remove empty values
+            Object.keys(config).forEach(key => {
+                if (config[key] === "" || (Array.isArray(config[key]) && config[key].length === 0)) {
+                    delete config[key];
+                }
+            });
+
+            // Update global config
+            appConfig = config;
+            
+            try {
+                const headers = {
+                    'Content-Type': 'application/json',
+                    ...getAuthHeader()
+                };
+                
+                const response = await fetch(`${apiBaseUrl}/admin/config`, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(config)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                showMessage('Configuration saved successfully!', 'success');
+                
+                // Refresh audio status after config update
+                setTimeout(refreshAudioStatus, 1000);
+            } catch (error) {
+                showMessage(`Error saving configuration: ${error.message}`, 'error');
+            }
+        });
+
+        // Export configuration to JSON file
+        document.getElementById('exportBtn').addEventListener('click', () => {
+            try {
+                const dataStr = JSON.stringify(appConfig, null, 2);
+                const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                
+                const exportFileDefaultName = 'admin_config.json';
+                
+                const linkElement = document.createElement('a');
+                linkElement.setAttribute('href', dataUri);
+                linkElement.setAttribute('download', exportFileDefaultName);
+                linkElement.click();
+                
+                showMessage('Configuration exported successfully!', 'success');
+            } catch (error) {
+                showMessage(`Error exporting configuration: ${error.message}`, 'error');
+            }
+        });
+
+        // Import configuration from JSON file
+        document.getElementById('importBtn').addEventListener('click', () => {
+            document.getElementById('importInput').click();
+        });
+
+        document.getElementById('importInput').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const config = JSON.parse(e.target.result);
+                    appConfig = config;
+                    updateFormWithCurrentConfig(config);
+                    showMessage('Configuration imported successfully!', 'success');
+                } catch (error) {
+                    showMessage(`Error importing configuration: ${error.message}`, 'error');
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        function showMessage(message, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = message;
+            messageDiv.className = type;
+        }
+
+        function updateFormWithCurrentConfig(config) {
+            // API Keys
+            if (config.elevenlabs_api_key) {
+                document.getElementById('elevenlabs_api_key').value = config.elevenlabs_api_key;
+            }
+            if (config.openai_api_key) {
+                document.getElementById('openai_api_key').value = config.openai_api_key;
+            }
+            
+            // Language Settings
+            if (config.default_source_language) {
+                document.getElementById('default_source_language').value = config.default_source_language;
+            }
+            
+            // Target Languages
+            ['english', 'thai', 'chinese', 'vietnamese'].forEach(lang => {
+                document.getElementById(lang).checked = false;
+            });
+            if (config.target_languages) {
+                config.target_languages.forEach(lang => {
+                    const checkbox = document.getElementById(lang.toLowerCase());
+                    if (checkbox) {
+                        checkbox.checked = true;
+                    }
+                });
+            }
+            
+            // Publishing Settings
+            if (config.publish_mode) {
+                document.getElementById('publish_mode').value = config.publish_mode;
+            }
+            
+            // Model Settings
+            if (config.tts_model) {
+                document.getElementById('tts_model').value = config.tts_model;
+            }
+            if (config.stt_model) {
+                document.getElementById('stt_model').value = config.stt_model;
+            }
+            
+            // Audio Recording Settings
+            if (config.audio_device_id) {
+                document.getElementById('audio_device_id').value = config.audio_device_id;
+            } else {
+                document.getElementById('audio_device_id').value = '';
+            }
+            if (config.sample_rate) {
+                document.getElementById('sample_rate').value = config.sample_rate;
+            }
+            if (config.poll_interval) {
+                document.getElementById('poll_interval').value = config.poll_interval;
+            }
+            if (config.first_record_seconds) {
+                document.getElementById('first_record_seconds').value = config.first_record_seconds;
+            }
+            if (config.min_audio_duration) {
+                document.getElementById('min_audio_duration').value = config.min_audio_duration;
+            }
+        }
+
+        // Initialize page
+        async function initializePage() {
+            // Load audio status and devices on page load
+            await refreshAudioStatus();
+            await loadAudioDevices();
+        }
+
+        // Initialize the page when DOM is loaded
+        initializePage();
+    </script>
+</body>

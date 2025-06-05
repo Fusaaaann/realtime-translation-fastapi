@@ -10,6 +10,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
+from mock_audio import mock_initialize_audio_recorder, mock_get_audio_frames, mock_continuous_recorder
 
 # Import the necessary items from your app.
 from server import (
@@ -136,18 +137,29 @@ def dummy_get_local_audio_source(record_seconds: int = 15, sample_rate: int = 16
         empty_audio = np.zeros((int(record_seconds * sample_rate), 1), dtype=np.int16).tobytes()
         return empty_audio, sample_rate
 
+
 @pytest.fixture
 def setup_local_audio(monkeypatch, request):
     """
-    This fixture overrides the get_local_audio_source function so that instead of reading
-    from a file, it simulates capturing audio from a microphone. It returns dummy audio
-    data (a silent PCM signal) and a sample rate.
+    This fixture overrides the audio recording functions to use mock implementations
+    that generate silent audio instead of recording from a real microphone.
     """
     use_real_mic = request.config.getoption("--use-real-mic")
     if use_real_mic:
         return
-    # Replace the original get_local_audio_source with our dummy version.
-    monkeypatch.setattr("server.get_local_audio_source", dummy_get_local_audio_source)
+    
+    # Replace the audio recording functions with our mock versions
+    monkeypatch.setattr("server.initialize_audio_recorder", mock_initialize_audio_recorder)
+    monkeypatch.setattr("server.get_audio_frames", mock_get_audio_frames)
+    
+    # Initialize the mock recorder
+    mock_initialize_audio_recorder()
+    
+    # Clean up when the test is done
+    yield
+    
+    if mock_continuous_recorder is not None:
+        mock_continuous_recorder.stop()
 
 # --- Monkeypatching & Configuration Fixture ---
 
@@ -221,6 +233,7 @@ def test_local_audio_source_integration(setup_local_audio, configure_testing):
                     f"Dummy TTS audio mismatch for language {lang}."
 
 
+@pytest.mark.asyncio
 class TestSpeakingCaptions:
     def test_regular_endpoint(self, setup_local_audio, configure_testing):
         """Test the regular speaking captions endpoint"""
@@ -262,6 +275,7 @@ class TestSpeakingCaptions:
                             break
 
 
+@pytest.mark.asyncio
 class TestTranslatedCaptions:
     @pytest.mark.parametrize("lang", [
         lang for lang in admin_config.get("target_languages", [])
@@ -311,6 +325,7 @@ class TestTranslatedCaptions:
                             break
 
 
+@pytest.mark.asyncio
 class TestTranslatedAudio:
     @pytest.mark.parametrize("lang", [
         lang for lang in admin_config.get("target_languages", [])
@@ -366,6 +381,7 @@ class TestTranslatedAudio:
                             break
 
 
+@pytest.mark.asyncio
 class TestPublishEndpoint:
     def test_upload_mode(self, configure_testing):
         """Test the publish endpoint in upload mode"""

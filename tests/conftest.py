@@ -13,3 +13,8 @@ def pytest_addoption(parser):
         default=False,
         help="Call third party api instead of returning mocked data."
     )
+
+
+@pytest.fixture(scope="session")
+def anyio_backend():
+    return "asyncio"

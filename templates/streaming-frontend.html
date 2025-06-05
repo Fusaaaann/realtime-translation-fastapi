@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Translator</title>
+  <style>
+    /* Simple style for the caption display */
+    #caption {
+      font-size: 1.5em;
+      text-align: center;
+      margin-top: 20px;
+      padding: 10px;
+      background: #f4f4f4;
+      border-radius: 4px;
+      width: 80%;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    
+    #status {
+      text-align: center;
+      margin-top: 10px;
+      font-size: 0.9em;
+      color: #666;
+    }
+    
+    .connection-status {
+      display: inline-block;
+      margin: 0 10px;
+    }
+    
+    .connected {
+      color: green;
+    }
+    
+    .disconnected {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <div id="caption">Captions will appear here</div>
+  <div id="status">
+    <span class="connection-status">Audio: <span id="audio-status" class="disconnected">Disconnected</span></span>
+    <span class="connection-status">Captions: <span id="caption-status" class="disconnected">Disconnected</span></span>
+  </div>
+
+  <script>
+    // Create an AudioContext
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    let nextPlayTime = audioContext.currentTime; // time when the next audio segment should play
+    const apiBaseUrl = "{{ api_base_url }}";
+
+    // Language setting
+    const language = "ENGLISH";
+
+    // EventSource connections
+    let audioEventSource = null;
+    let captionEventSource = null;
+
+    // Status elements
+    const audioStatusEl = document.getElementById("audio-status");
+    const captionStatusEl = document.getElementById("caption-status");
+
+    /**
+     * Update connection status display
+     */
+    function updateStatus(type, connected) {
+      const statusEl = type === 'audio' ? audioStatusEl : captionStatusEl;
+      statusEl.textContent = connected ? 'Connected' : 'Disconnected';
+      statusEl.className = connected ? 'connected' : 'disconnected';
+    }
+
+    /**
+     * Set up streaming connection for audio segments.
+     */
+    function setupAudioStream() {
+      // Close existing connection if any
+      if (audioEventSource) {
+        audioEventSource.close();
+      }
+
+      const audioStreamUrl = `${apiBaseUrl}/audio/translated-voice/stream?lang=${language}`;
+      audioEventSource = new EventSource(audioStreamUrl);
+
+      audioEventSource.onopen = function(event) {
+        console.log("Audio stream connected");
+        updateStatus('audio', true);
+      };
+
+      audioEventSource.onmessage = function(event) {
+        try {
+          const audioSegments = JSON.parse(event.data);
+          
+          // Process each new segment
+          for (const segment of audioSegments) {
+            // Convert the base64 audio data into an ArrayBuffer.
+            const base64String = segment.audio;
+            const binaryString = atob(base64String);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            // Decode the audio data and schedule it for playback.
+            audioContext.decodeAudioData(bytes.buffer, (decodedData) => {
+              // Create a buffer source node.
+              const source = audioContext.createBufferSource();
+              source.buffer = decodedData;
+              source.connect(audioContext.destination);
+
+              // If nextPlayTime is in the past, adjust it to play slightly in the future for seamless playback.
+              let startTime = nextPlayTime;
+              const now = audioContext.currentTime;
+              if (startTime < now) {
+                startTime = now + 0.1;
+              }
+              source.start(startTime);
+              // Update nextPlayTime for subsequent segments.
+              nextPlayTime = startTime + decodedData.duration;
+            }, (error) => {
+              console.error("Error decoding audio", error);
+            });
+          }
+        } catch (error) {
+          console.error("Error processing audio stream data:", error);
+        }
+      };
+
+      audioEventSource.onerror = function(event) {
+        console.error("Audio stream error:", event);
+        updateStatus('audio', false);
+        
+        // Attempt to reconnect after a delay
+        setTimeout(() => {
+          console.log("Attempting to reconnect audio stream...");
+          setupAudioStream();
+        }, 5000);
+      };
+    }
+
+    /**
+     * Set up streaming connection for captions.
+     */
+    function setupCaptionStream() {
+      // Close existing connection if any
+      if (captionEventSource) {
+        captionEventSource.close();
+      }
+
+      const captionStreamUrl = `${apiBaseUrl}/captions/translated/stream?lang=${language}`;
+      captionEventSource = new EventSource(captionStreamUrl);
+
+      captionEventSource.onopen = function(event) {
+        console.log("Caption stream connected");
+        updateStatus('caption', true);
+      };
+
+      captionEventSource.onmessage = function(event) {
+        try {
+          const captions = JSON.parse(event.data);
+          
+          // If new captions are returned, update the display.
+          if (captions.length > 0) {
+            // For simplicity, display the latest caption.
+            const latestCaption = captions[captions.length - 1];
+            document.getElementById("caption").innerText = latestCaption.text;
+          }
+        } catch (error) {
+          console.error("Error processing caption stream data:", error);
+        }
+      };
+
+      captionEventSource.onerror = function(event) {
+        console.error("Caption stream error:", event);
+        updateStatus('caption', false);
+        
+        // Attempt to reconnect after a delay
+        setTimeout(() => {
+          console.log("Attempting to reconnect caption stream...");
+          setupCaptionStream();
+        }, 5000);
+      };
+    }
+
+    /**
+     * Initialize streaming connections
+     */
+    function initializeStreams() {
+      setupAudioStream();
+      setupCaptionStream();
+    }
+
+    /**
+     * Clean up connections when the page is unloaded
+     */
+    function cleanup() {
+      if (audioEventSource) {
+        audioEventSource.close();
+      }
+      if (captionEventSource) {
+        captionEventSource.close();
+      }
+    }
+
+    // Resume the AudioContext on user interaction (e.g., a click) since many browsers block audio autoplay.
+    document.body.addEventListener('click', () => {
+      if (audioContext.state === 'suspended') {
+        audioContext.resume().then(() => {
+          console.log("AudioContext resumed");
+        });
+      }
+    });
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', cleanup);
+
+    // Handle visibility change to manage connections when tab is hidden/shown
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // Page is hidden, you might want to keep connections alive or close them
+        console.log("Page hidden");
+      } else {
+        // Page is visible again, ensure connections are active
+        console.log("Page visible");
+        // Check if connections are still alive, reconnect if needed
+        if (!audioEventSource || audioEventSource.readyState === EventSource.CLOSED) {
+          setupAudioStream();
+        }
+        if (!captionEventSource || captionEventSource.readyState === EventSource.CLOSED) {
+          setupCaptionStream();
+        }
+      }
+    });
+
+    // Initialize streams after the window loads.
+    window.addEventListener('load', () => {
+      // Add a small delay to ensure everything is ready
+      setTimeout(() => {
+        initializeStreams();
+      }, 100);
+    });
+
+    // Add click instruction for audio context
+    document.getElementById("caption").addEventListener('click', () => {
+      if (audioContext.state === 'suspended') {
+        document.getElementById("caption").innerText = "Click detected - Audio enabled!";
+      }
+    });
+  </script>
+</body>
+</html>
