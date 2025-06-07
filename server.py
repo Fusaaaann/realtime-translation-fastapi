@@ -1843,6 +1843,7 @@ async def serve_admin(request: Request, admin_token: str):
         "config": admin_config,
         "api_base_url": base_url,
         "admin_token": admin_token,
+        "api_key": API_KEY,
     }
 
     return templates.TemplateResponse("admin-frontend.html", context)
