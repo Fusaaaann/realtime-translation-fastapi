@@ -1,0 +1,348 @@
+<!-- [EVAL_HTML_START] -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Translation Evaluation Results</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- [STYLE_BLOCK] -->
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            margin: 0;
+            background: #f7f7fa;
+            color: #222;
+        }
+        header {
+            background: #2c3e50;
+            color: #fff;
+            padding: 1.2em 2em;
+            margin-bottom: 1.5em;
+        }
+        h1 {
+            margin: 0 0 0.2em 0;
+            font-size: 2em;
+        }
+        .summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2em;
+            margin-bottom: 2em;
+        }
+        .summary-card {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px #0001;
+            padding: 1.2em 1.5em;
+            min-width: 220px;
+            flex: 1 1 220px;
+        }
+        .summary-card h2 {
+            margin: 0 0 0.5em 0;
+            font-size: 1.2em;
+            color: #2c3e50;
+        }
+        .section {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px #0001;
+            margin-bottom: 2em;
+            padding: 1.5em;
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1em;
+        }
+        th, td {
+            padding: 0.6em 0.8em;
+            border-bottom: 1px solid #eee;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background: #f0f3f8;
+        }
+        tr.success {
+            background: #eafbe7;
+        }
+        tr.failed {
+            background: #fbeaea;
+        }
+        .audio-player {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+        }
+        .rate-btn {
+            background: #eee;
+            border: none;
+            border-radius: 4px;
+            padding: 0.3em 0.7em;
+            margin: 0 0.2em;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background 0.2s;
+        }
+        .rate-btn.selected {
+            background: #2ecc40;
+            color: #fff;
+        }
+        .rate-btn.bad.selected {
+            background: #e74c3c;
+        }
+        .rate-status {
+            font-size: 0.95em;
+            color: #888;
+            margin-left: 0.5em;
+        }
+        .small {
+            font-size: 0.95em;
+            color: #555;
+        }
+        .nowrap {
+            white-space: nowrap;
+        }
+        .error-list {
+            color: #c0392b;
+            margin: 0.5em 0 0 1em;
+            font-size: 0.98em;
+        }
+        .missing-list {
+            color: #e67e22;
+            margin: 0.5em 0 0 1em;
+            font-size: 0.98em;
+        }
+        @media (max-width: 900px) {
+            .summary { flex-direction: column; }
+            .summary-card { min-width: unset; }
+        }
+        @media (max-width: 600px) {
+            .section, .summary-card { padding: 1em; }
+            th, td { font-size: 0.97em; }
+        }
+    </style>
+    <!-- [STYLE_BLOCK_END] -->
+</head>
+<body>
+<header>
+    <h1>Translation Evaluation Results</h1>
+    <div class="small">
+        <span>Evaluation Date: {{ results.metadata.timestamp[:19].replace('T',' ') }}</span>
+        <span style="margin-left:2em;">Audio Dir: {{ results.metadata.eval_data_dir }}</span>
+    </div>
+</header>
+
+<main>
+    <!-- [SUMMARY_SECTION] -->
+    <div class="summary">
+        <div class="summary-card">
+            <h2>Transcription</h2>
+            <div>
+                <b>Status:</b>
+                {% if results.transcription_evaluation.transcribed_text %}
+                    <span style="color: #27ae60;">&#10003; Success</span>
+                {% else %}
+                    <span style="color: #e74c3c;">&#10007; Failed</span>
+                {% endif %}
+            </div>
+            <div><b>Provider:</b> {{ results.transcription_evaluation.stt_provider }}</div>
+            <div><b>Audio file:</b> {{ results.transcription_evaluation.audio_file }}</div>
+            <div><b>Language:</b> {{ results.transcription_evaluation.mapped_language }}</div>
+            <div><b>Length:</b> {{ results.transcription_evaluation.text_length }} chars</div>
+            <div><b>Words:</b> {{ results.transcription_evaluation.word_count }}</div>
+        </div>
+        <div class="summary-card">
+            <h2>Prompt Format</h2>
+            <div><b>Total prompts:</b> {{ results.format_evaluation.total_prompts }}</div>
+            <div><b>Valid:</b> {{ results.format_evaluation.valid_prompts }}</div>
+            <div>
+                <b>Issues:</b>
+                {% if results.format_evaluation.format_issues %}
+                    <span style="color: #e67e22;">&#9888; {{ results.format_evaluation.format_issues|length }}</span>
+                {% else %}
+                    <span style="color: #27ae60;">None</span>
+                {% endif %}
+            </div>
+            <div>
+                <b>Missing pairs:</b>
+                {% if results.format_evaluation.missing_pairs %}
+                    <span style="color: #e67e22;">&#9888; {{ results.format_evaluation.missing_pairs|length }}</span>
+                {% else %}
+                    <span style="color: #27ae60;">None</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="summary-card">
+            <h2>Translation</h2>
+            <div><b>Attempted:</b> {{ results.metadata.total_translations }}</div>
+            <div><b>Success:</b> {{ results.metadata.successful_translations }}</div>
+            <div><b>Rate:</b> {{ "%.1f"|format(results.metadata.success_rate) }}%</div>
+        </div>
+        <div class="summary-card">
+            <h2>TTS Audio</h2>
+            <div><b>Files:</b> {{ results.metadata.tts_files_generated }}</div>
+            <div><b>Dir:</b> <span class="small">{{ results.metadata.eval_data_dir }}</span></div>
+        </div>
+    </div>
+    <!-- [SUMMARY_SECTION_END] -->
+
+    <!-- [TRANSCRIPTION_SECTION] -->
+    <div class="section">
+        <h2>Transcription</h2>
+        <div>
+            <b>Audio file:</b> {{ results.transcription_evaluation.audio_file }}<br>
+            <b>Provider:</b> {{ results.transcription_evaluation.stt_provider }}<br>
+            <b>Language:</b> {{ results.transcription_evaluation.mapped_language }}<br>
+            <b>Text:</b>
+            <div style="margin:0.5em 0 0 1em; font-size:1.1em; background:#f8f8fa; padding:0.7em 1em; border-radius:6px;">
+                {{ results.transcription_evaluation.transcribed_text }}
+            </div>
+        </div>
+    </div>
+    <!-- [TRANSCRIPTION_SECTION_END] -->
+
+    <!-- [PROMPT_FORMAT_SECTION] -->
+    <div class="section">
+        <h2>Prompt Format Evaluation</h2>
+        <div>
+            <b>Total prompts:</b> {{ results.format_evaluation.total_prompts }}<br>
+            <b>Valid prompts:</b> {{ results.format_evaluation.valid_prompts }}<br>
+            {% if results.format_evaluation.format_issues %}
+                <div class="error-list">
+                    <b>Format issues:</b>
+                    <ul>
+                        {% for issue in results.format_evaluation.format_issues %}
+                            <li>{{ issue }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+            {% if results.format_evaluation.missing_pairs %}
+                <div class="missing-list">
+                    <b>Missing language pairs:</b>
+                    <ul>
+                        {% for pair in results.format_evaluation.missing_pairs %}
+                            <li>{{ pair }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    <!-- [PROMPT_FORMAT_SECTION_END] -->
+
+    <!-- [TRANSLATION_TABLE_SECTION] -->
+    <div class="section">
+        <h2>Translation Results</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Source Lang</th>
+                    <th>Target Lang</th>
+                    <th>Source Text</th>
+                    <th>Translated Text</th>
+                    <th>Translation Time</th>
+                    <th>TTS Audio</th>
+                    <th>Rate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for row in results.recall_evaluation %}
+                <tr class="{% if row.success %}success{% else %}failed{% endif %}">
+                    <td class="nowrap">{{ row.source_lang }}</td>
+                    <td class="nowrap">{{ row.target_lang }}</td>
+                    <td style="max-width:220px; word-break:break-word;">{{ row.source_text }}</td>
+                    <td style="max-width:220px; word-break:break-word;">
+                        {% if row.translated_text %}
+                            {{ row.translated_text }}
+                        {% else %}
+                            <span style="color:#e74c3c;">(none)</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if row.translation_time %}
+                            {{ "%.2f"|format(row.translation_time) }}s
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if row.tts_filename %}
+                            <div class="audio-player">
+                                <audio controls preload="none" style="width:120px;">
+                                    <source src="/audio/{{ row.tts_filename }}" type="audio/mpeg">
+                                    Your browser does not support audio.
+                                </audio>
+                                <span class="small">{{ row.tts_filename }}</span>
+                            </div>
+                        {% else %}
+                            <span style="color:#aaa;">(none)</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if row.tts_filename %}
+                            <div class="rating" data-evalid="{{ row.eval_id }}">
+                                <button class="rate-btn good" onclick="rateTranslation('{{ row.eval_id }}', 'good', this)">👍</button>
+                                <button class="rate-btn bad" onclick="rateTranslation('{{ row.eval_id }}', 'bad', this)">👎</button>
+                                <span class="rate-status" id="rate-status-{{ row.eval_id }}"></span>
+                            </div>
+                        {% else %}
+                            <span style="color:#aaa;">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if row.success %}
+                            <span style="color:#27ae60;">&#10003; Success</span>
+                        {% else %}
+                            <span style="color:#e74c3c;">&#10007; Failed</span>
+                            <div class="small" style="color:#c0392b;">{{ row.error }}</div>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <!-- [TRANSLATION_TABLE_SECTION_END] -->
+</main>
+
+<!-- [SCRIPT_BLOCK] -->
+<script>
+function rateTranslation(evalId, rating, btn) {
+    // Deselect all buttons in this rating group
+    var ratingDiv = btn.parentElement;
+    var btns = ratingDiv.querySelectorAll('.rate-btn');
+    btns.forEach(function(b) { b.classList.remove('selected'); });
+    btn.classList.add('selected');
+    if (btn.classList.contains('bad')) btn.classList.add('selected');
+
+    // Show "Saving..." status
+    var statusSpan = document.getElementById('rate-status-' + evalId);
+    if (statusSpan) statusSpan.textContent = "Saving...";
+
+    // Send POST to /api/rate
+    fetch('/api/rate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eval_id: evalId, rating: rating })
+    })
+    .then(resp => resp.json())
+    .then(data => {
+        if (statusSpan) statusSpan.textContent = "Saved!";
+        setTimeout(() => { if (statusSpan) statusSpan.textContent = ""; }, 2000);
+    })
+    .catch(err => {
+        if (statusSpan) statusSpan.textContent = "Error!";
+    });
+}
+</script>
+<!-- [SCRIPT_BLOCK_END] -->
+</body>
+</html>
+<!-- [EVAL_HTML_END] -->

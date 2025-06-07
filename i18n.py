@@ -117,16 +117,76 @@ DEFAULT_MESSAGES = {
     "instructions": "Click anywhere to enable audio playback",
 }
 translation_prompt = {
-    (Language.ENGLISH, Language.CHINESE): "Translate the following text from English to Chinese: ${text}",
-    (Language.ENGLISH, Language.VIETNAMESE): "Translate the following text from English to Vietnamese: ${text}",
-    (Language.ENGLISH, Language.THAI): "Translate the following text from English to Thai: ${text}",
-    (Language.CHINESE, Language.ENGLISH): "Translate the following text from Chinese to English: ${text}",
-    (Language.CHINESE, Language.VIETNAMESE): "Translate the following text from Chinese to Vietnamese: ${text}",
-    (Language.CHINESE, Language.THAI): "Translate the following text from Chinese to Thai: ${text}",
-    (Language.VIETNAMESE, Language.ENGLISH): "Translate the following text from Vietnamese to English: ${text}",
-    (Language.VIETNAMESE, Language.CHINESE): "Translate the following text from Vietnamese to Chinese: ${text}",
-    (Language.VIETNAMESE, Language.THAI): "Translate the following text from Vietnamese to Thai: ${text}",
-    (Language.THAI, Language.ENGLISH): "Translate the following text from Thai to English: ${text}",
-    (Language.THAI, Language.CHINESE): "Translate the following text from Thai to Chinese: ${text}",
-    (Language.THAI, Language.VIETNAMESE): "Translate the following text from Thai to Vietnamese: ${text}",
+    (Language.ENGLISH, Language.CHINESE): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from English to Chinese. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.ENGLISH, Language.VIETNAMESE): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from English to Vietnamese. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.ENGLISH, Language.THAI): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from English to Thai. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.CHINESE, Language.ENGLISH): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from Chinese to English. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.CHINESE, Language.VIETNAMESE): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from Chinese to Vietnamese. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.CHINESE, Language.THAI): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from Chinese to Thai. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.VIETNAMESE, Language.ENGLISH): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from Vietnamese to English. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.VIETNAMESE, Language.CHINESE): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from Vietnamese to Chinese. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.VIETNAMESE, Language.THAI): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from Vietnamese to Thai. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.THAI, Language.ENGLISH): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from Thai to English. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.THAI, Language.CHINESE): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from Thai to Chinese. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
+    (Language.THAI, Language.VIETNAMESE): (
+        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
+        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
+        "Then, translate the cleaned text accurately from Thai to Vietnamese. "
+        "Provide only the final translated text:\n\n${text}"
+    ),
 }
