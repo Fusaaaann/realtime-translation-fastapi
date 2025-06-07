@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Audio Recorder</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+      margin: 0;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    
+    .language-selector {
+      margin-bottom: 20px;
+    }
+    
+    #language-dropdown {
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      font-size: 16px;
+      margin-left: 10px;
+    }
+    
+    .recording-container {
+      background-color: rgba(0, 0, 0, 0.7);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      min-height: 100px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .status-text {
+      color: white;
+      font-size: 20px;
+      text-align: center;
+      line-height: 1.5;
+      margin-bottom: 20px;
+      animation: fadeIn 0.5s ease-in-out;
+    }
+    
+    .recording-indicator {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background-color: #ff4444;
+      margin-right: 10px;
+      display: none;
+    }
+    
+    .recording-indicator.active {
+      display: inline-block;
+      animation: pulse 1s infinite;
+    }
+    
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    
+    .controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    
+    .control-button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    
+    .start-button {
+      background-color: #4CAF50;
+      color: white;
+    }
+    
+    .start-button:hover {
+      background-color: #45a049;
+    }
+    
+    .start-button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    
+    .stop-button {
+      background-color: #f44336;
+      color: white;
+    }
+    
+    .stop-button:hover {
+      background-color: #da190b;
+    }
+    
+    .stop-button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    
+    .instructions {
+      text-align: center;
+      color: #666;
+      font-style: italic;
+    }
+    
+    .stats {
+      background-color: white;
+      border-radius: 8px;
+      padding: 15px;
+      margin-top: 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+    }
+    
+    .stat-item {
+      text-align: center;
+    }
+    
+    .stat-value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .stat-label {
+      font-size: 14px;
+      color: #666;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="language-selector">
+      <label for="language-dropdown">🌐 Source Language:</label>
+      <select id="language-dropdown">
+        {% for language in languages %}
+          <option value="{{ language.code }}">{{ language.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    
+    <div class="recording-container">
+      <div id="status" class="status-text">Ready to record</div>
+      <div class="controls">
+        <div class="recording-indicator" id="recording-indicator"></div>
+        <button id="start-button" class="control-button start-button">Start Recording</button>
+        <button id="stop-button" class="control-button stop-button" disabled>Stop Recording</button>
+      </div>
+    </div>
+    
+    <div class="instructions">
+      <p>Select your source language and click "Start Recording" to begin continuous audio capture.</p>
+      <p>Audio will be automatically sent to the server in chunks for processing.</p>
+    </div>
+    
+    <div class="stats">
+      <div class="stat-item">
+        <div id="chunks-sent" class="stat-value">0</div>
+        <div class="stat-label">Chunks Sent</div>
+      </div>
+      <div class="stat-item">
+        <div id="recording-time" class="stat-value">00:00</div>
+        <div class="stat-label">Recording Time</div>
+      </div>
+      <div class="stat-item">
+        <div id="upload-status" class="stat-value">Ready</div>
+        <div class="stat-label">Upload Status</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const apiBaseUrl = "{{ api_base_url }}";
+    
+    // Audio recording variables
+    let mediaRecorder = null;
+    let audioStream = null;
+    let isRecording = false;
+    let recordingStartTime = null;
+    let recordingTimer = null;
+    
+    // Statistics
+    let chunksSent = 0;
+    
+    // DOM elements
+    const languageDropdown = document.getElementById('language-dropdown');
+    const statusElement = document.getElementById('status');
+    const startButton = document.getElementById('start-button');
+    const stopButton = document.getElementById('stop-button');
+    const recordingIndicator = document.getElementById('recording-indicator');
+    const chunksSentElement = document.getElementById('chunks-sent');
+    const recordingTimeElement = document.getElementById('recording-time');
+    const uploadStatusElement = document.getElementById('upload-status');
+    
+    // Recording configuration
+    const CHUNK_DURATION = 3000; // 3 seconds per chunk
+    const SAMPLE_RATE = 44100; // Default sample rate
+    
+    /**
+     * Get the currently selected language
+     */
+    function getSelectedLanguage() {
+      return languageDropdown.value;
+    }
+    
+    /**
+     * Update the recording timer display
+     */
+    function updateRecordingTimer() {
+      if (!recordingStartTime) return;
+      
+      const elapsed = Date.now() - recordingStartTime;
+      const minutes = Math.floor(elapsed / 60000);
+      const seconds = Math.floor((elapsed % 60000) / 1000);
+      recordingTimeElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    
+    /**
+     * Send audio chunk to the server
+     */
+    async function sendAudioChunk(audioBlob) {
+      try {
+        uploadStatusElement.textContent = 'Uploading...';
+        uploadStatusElement.style.color = '#ff9800';
+        
+        const formData = new FormData();
+        formData.append('mode', 'upload');
+        formData.append('sourceLanguage', getSelectedLanguage());
+        formData.append('audio_file', audioBlob, 'audio_chunk.webm');
+        formData.append('sampleRate', SAMPLE_RATE.toString());
+        
+        const response = await fetch(`${apiBaseUrl}/publish`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (response.ok) {
+          chunksSent++;
+          chunksSentElement.textContent = chunksSent;
+          uploadStatusElement.textContent = 'Success';
+          uploadStatusElement.style.color = '#4CAF50';
+        } else {
+          throw new Error(`HTTP ${response.status}`);
+        }
+      } catch (error) {
+        console.error('Error sending audio chunk:', error);
+        uploadStatusElement.textContent = 'Error';
+        uploadStatusElement.style.color = '#f44336';
+      }
+      
+      // Reset upload status after 2 seconds
+      setTimeout(() => {
+        if (isRecording) {
+          uploadStatusElement.textContent = 'Ready';
+          uploadStatusElement.style.color = '#333';
+        }
+      }, 2000);
+    }
+    
+    /**
+     * Start continuous audio recording
+     */
+    async function startRecording() {
+      try {
+        // Request microphone access
+        audioStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            sampleRate: SAMPLE_RATE,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true
+          } 
+        });
+        
+        // Create MediaRecorder
+        mediaRecorder = new MediaRecorder(audioStream, {
+          mimeType: 'audio/webm;codecs=opus'
+        });
+        
+        // Handle data available event
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            sendAudioChunk(event.data);
+          }
+        };
+        
+        // Start recording with time slicing
+        mediaRecorder.start(CHUNK_DURATION);
+        
+        // Update UI
+        isRecording = true;
+        recordingStartTime = Date.now();
+        startButton.disabled = true;
+        stopButton.disabled = false;
+        recordingIndicator.classList.add('active');
+        statusElement.textContent = 'Recording...';
+        
+        // Start timer
+        recordingTimer = setInterval(updateRecordingTimer, 1000);
+        
+      } catch (error) {
+        console.error('Error starting recording:', error);
+        statusElement.textContent = 'Error: Could not access microphone';
+        alert('Could not access microphone. Please check permissions.');
+      }
+    }
+    
+    /**
+     * Stop continuous audio recording
+     */
+    function stopRecording() {
+      if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+        
+        // Stop all audio tracks
+        if (audioStream) {
+          audioStream.getTracks().forEach(track => track.stop());
+        }
+        
+        // Update UI
+        isRecording = false;
+        recordingStartTime = null;
+        startButton.disabled = false;
+        stopButton.disabled = true;
+        recordingIndicator.classList.remove('active');
+        statusElement.textContent = 'Recording stopped';
+        
+        // Clear timer
+        if (recordingTimer) {
+          clearInterval(recordingTimer);
+          recordingTimer = null;
+        }
+        
+        // Reset upload status
+        uploadStatusElement.textContent = 'Ready';
+        uploadStatusElement.style.color = '#333';
+      }
+    }
+    
+    /**
+     * Reset statistics when language changes
+     */
+    languageDropdown.addEventListener('change', () => {
+      if (isRecording) {
+        stopRecording();
+      }
+      
+      // Reset stats
+      chunksSent = 0;
+      chunksSentElement.textContent = '0';
+      recordingTimeElement.textContent = '00:00';
+      uploadStatusElement.textContent = 'Ready';
+      uploadStatusElement.style.color = '#333';
+      statusElement.textContent = 'Ready to record';
+    });
+    
+    // Event listeners
+    startButton.addEventListener('click', startRecording);
+    stopButton.addEventListener('click', stopRecording);
+    
+    // Handle page unload
+    window.addEventListener('beforeunload', () => {
+      if (isRecording) {
+        stopRecording();
+      }
+    });
+    
+    // Check for browser support
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      statusElement.textContent = 'Error: Browser does not support audio recording';
+      startButton.disabled = true;
+    }
+  </script>
+</body>
+</html>

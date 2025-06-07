@@ -1,6 +1,6 @@
 import io
 from contextlib import contextmanager
-import signal
+from scipy import signal
 import threading
 import wave
 import sounddevice as sd
@@ -892,6 +892,7 @@ def initialize_audio_recorder(sample_rate=16000, device_id=None, buffer_seconds=
     :param buffer_seconds: Maximum duration of audio to keep in the buffer (seconds)
     """
     global continuous_recorder
+    logger.info("called server.initialize_audio_recorder")
 
     # Stop existing recorder if running
     if continuous_recorder is not None:
@@ -1085,6 +1086,7 @@ async def local_audio_source_processor():
                     )
                     stt_duration = time.time() - stt_start_time
                     logger.info(f"Speech-to-text completed in {stt_duration:.2f}s")
+                    logger.debug(f"{result=}")
 
                     transcribed_text = result.text
                     timestamp = time.time()
@@ -1096,9 +1098,6 @@ async def local_audio_source_processor():
 
                         # For every target language (skip if source equals target)
                         async def process_language(language: str):
-                            if DEFAULT_SOURCE_LANGUAGE.upper() == language.upper():
-                                logger.info(f"Skipping translation for {language} because source and target are the same.")
-                                return
                             translated_text = translate_text(transcribed_text, DEFAULT_SOURCE_LANGUAGE, language)
                             await published_data_store.update_translated(language, timestamp, translated_text)
                             tts_audio = text_to_speech(translated_text, language)
@@ -1751,6 +1750,31 @@ async def serve_admin(request: Request, admin_token: str):
     }
 
     return templates.TemplateResponse("admin-frontend.html", context)
+
+
+@app.get("/upload")
+async def serve_upload(request: Request, streaming: bool = False):
+    """Serve the main index.html page or streaming-frontend.html if streaming is enabled."""
+    base_url = str(request.base_url).rstrip("/")
+    target_languages = admin_config.get("target_languages")
+    languages = [
+        {
+            "code": lang.value,
+            "name": lang.value.title(),
+            "native_name": lang.native_name,
+            "messages": LOCALIZED_MESSAGES.get(lang.value, DEFAULT_MESSAGES),
+        }
+        for lang in Language
+        if lang in target_languages
+    ]
+    # Prepare template context
+    context = {
+        "request": request,
+        "api_base_url": base_url,
+        "languages": languages,  # TODO: display all languages in language-selector
+        # TODO: check if it's automatically uploading when start is activated, configure how long is each clip
+    }
+    return templates.TemplateResponse("upload-frontend.html", context)
 
 
 ###############################################################################

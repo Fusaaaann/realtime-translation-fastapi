@@ -1,0 +1,7 @@
+scipy
+sounddevice
+elevenlabs
+fastapi
+uvicorn
+openai
+pytest-asyncio

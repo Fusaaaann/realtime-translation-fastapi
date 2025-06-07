@@ -3,27 +3,61 @@
 <head>
   <meta charset="UTF-8">
   <title>Translator</title>
-  <style>
-    /* Simple style for the caption display */
-    #caption {
-      font-size: 1.5em;
-      text-align: center;
-      margin-top: 20px;
-      padding: 10px;
-      background: #f4f4f4;
+ <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+      margin: 0;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    
+    .language-selector {
+      margin-bottom: 20px;
+    }
+    
+    #language-dropdown {
+      padding: 8px;
       border-radius: 4px;
-      width: 80%;
-      margin-left: auto;
-      margin-right: auto;
+      border: 1px solid #ccc;
+      font-size: 16px;
+      margin-left: 10px;
     }
     
-    #status {
+    .caption-container {
+      background-color: rgba(0, 0, 0, 0.7);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      min-height: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .caption-text {
+      color: white;
+      font-size: 20px;
       text-align: center;
-      margin-top: 10px;
-      font-size: 0.9em;
-      color: #666;
+      line-height: 1.5;
+      animation: fadeIn 0.5s ease-in-out;
     }
     
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    
+    .instructions {
+      text-align: center;
+      color: #666;
+      font-style: italic;
+    }
+
     .connection-status {
       display: inline-block;
       margin: 0 10px;
@@ -39,28 +73,47 @@
   </style>
 </head>
 <body>
-  <div id="caption">Captions will appear here</div>
-  <div id="status">
-    <span class="connection-status">Audio: <span id="audio-status" class="disconnected">Disconnected</span></span>
-    <span class="connection-status">Captions: <span id="caption-status" class="disconnected">Disconnected</span></span>
+  <div class="container">
+    <div class="language-selector">
+      <label for="language-dropdown">🌐</label>
+      <select id="language-dropdown">
+        {% for language in languages %}
+          <option value="{{ language.code }}" data-waiting="{{ language.messages.waiting }}" data-switching="{{ language.messages.switching }}" data-instructions="{{ language.messages.instructions }}">{{ language.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    
+    <div class="caption-container">
+      <div id="caption" class="caption-text">{{ languages[0].messages.waiting }}</div>
+    </div>
+    
+    <div class="instructions">
+      <p id="instructions-text">{{ languages[0].messages.instructions }}</p>
+    </div>
+    
   </div>
-
   <script>
-    // Create an AudioContext
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    let nextPlayTime = audioContext.currentTime; // time when the next audio segment should play
+    let nextPlayTime = audioContext.currentTime;
     const apiBaseUrl = "{{ api_base_url }}";
 
-    // Language setting
-    const language = "ENGLISH";
+    // Get language dropdown element
+    const languageDropdown = document.getElementById('language-dropdown');
+    const captionElement = document.getElementById("caption");
+    const instructionsElement = document.getElementById("instructions-text");
+    const audioStatusEl = document.getElementById("audio-status");
+    const captionStatusEl = document.getElementById("caption-status");
 
     // EventSource connections
     let audioEventSource = null;
     let captionEventSource = null;
-
-    // Status elements
-    const audioStatusEl = document.getElementById("audio-status");
-    const captionStatusEl = document.getElementById("caption-status");
+    
+    /**
+     * Get the currently selected language
+     */
+    function getSelectedLanguage() {
+      return languageDropdown.value;
+    }
 
     /**
      * Update connection status display
@@ -80,6 +133,7 @@
         audioEventSource.close();
       }
 
+      const language = getSelectedLanguage();
       const audioStreamUrl = `${apiBaseUrl}/audio/translated-voice/stream?lang=${language}`;
       audioEventSource = new EventSource(audioStreamUrl);
 
@@ -149,6 +203,7 @@
         captionEventSource.close();
       }
 
+      const language = getSelectedLanguage();
       const captionStreamUrl = `${apiBaseUrl}/captions/translated/stream?lang=${language}`;
       captionEventSource = new EventSource(captionStreamUrl);
 
@@ -165,7 +220,12 @@
           if (captions.length > 0) {
             // For simplicity, display the latest caption.
             const latestCaption = captions[captions.length - 1];
-            document.getElementById("caption").innerText = latestCaption.text;
+            
+            // Update caption with animation effect
+            captionElement.style.animation = 'none';
+            captionElement.offsetHeight; // Trigger reflow
+            captionElement.style.animation = 'fadeIn 0.5s ease-in-out';
+            captionElement.innerText = latestCaption.text;
           }
         } catch (error) {
           console.error("Error processing caption stream data:", error);
@@ -204,6 +264,24 @@
       }
     }
 
+    /**
+     * Handle language change
+     */
+    languageDropdown.addEventListener('change', () => {
+      // Close existing connections
+      cleanup();
+      
+      // Get the selected option
+      const selectedOption = languageDropdown.options[languageDropdown.selectedIndex];
+      
+      // Update caption and instructions with localized text
+      captionElement.innerText = selectedOption.dataset.switching;
+      instructionsElement.innerText = selectedOption.dataset.instructions;
+      
+      // Set up new connections with the selected language
+      initializeStreams();
+    });
+
     // Resume the AudioContext on user interaction (e.g., a click) since many browsers block audio autoplay.
     document.body.addEventListener('click', () => {
       if (audioContext.state === 'suspended') {
@@ -219,10 +297,8 @@
     // Handle visibility change to manage connections when tab is hidden/shown
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        // Page is hidden, you might want to keep connections alive or close them
         console.log("Page hidden");
       } else {
-        // Page is visible again, ensure connections are active
         console.log("Page visible");
         // Check if connections are still alive, reconnect if needed
         if (!audioEventSource || audioEventSource.readyState === EventSource.CLOSED) {
@@ -234,19 +310,12 @@
       }
     });
 
-    // Initialize streams after the window loads.
+    // Start streaming after the window loads.
     window.addEventListener('load', () => {
       // Add a small delay to ensure everything is ready
       setTimeout(() => {
         initializeStreams();
       }, 100);
-    });
-
-    // Add click instruction for audio context
-    document.getElementById("caption").addEventListener('click', () => {
-      if (audioContext.state === 'suspended') {
-        document.getElementById("caption").innerText = "Click detected - Audio enabled!";
-      }
     });
   </script>
 </body>
