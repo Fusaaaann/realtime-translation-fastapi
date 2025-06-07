@@ -1815,7 +1815,7 @@ async def serve_index(request: Request, streaming: bool = False):
             "messages": LOCALIZED_MESSAGES.get(lang.value, DEFAULT_MESSAGES),
         }
         for lang in Language
-        if lang in target_languages
+        if lang.value in target_languages
     ]
     # Prepare template context
     context = {
@@ -1869,7 +1869,7 @@ async def serve_upload(
             "messages": LOCALIZED_MESSAGES.get(lang.value, DEFAULT_MESSAGES),
         }
         for lang in Language
-        if lang in target_languages
+        if lang.value in target_languages
     ]
     context = {
         "request": request,
