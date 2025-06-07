@@ -1,5 +1,6 @@
 import io
 from contextlib import contextmanager
+import secrets
 from scipy import signal
 import threading
 import wave
@@ -17,7 +18,7 @@ import numpy as np
 from scipy.signal import resample
 
 from elevenlabs import ElevenLabs
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, Depends, Request, status
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, Depends, Request, status, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -46,6 +47,8 @@ default_config = {
     "first_record_seconds": 5,  # actual recording duration for better interactivity
     "min_audio_duration": 15,  # minimum duration required by the STT API
 }
+
+API_KEY = secrets.token_urlsafe(12)[:16]
 
 
 def load_admin_config() -> dict:
@@ -1264,11 +1267,17 @@ async def shutdown_event():
 ###############################################################################
 # HTTP Endpoints
 ###############################################################################
+def verify_api_key(x_api_key: str = Header(...)):
+    if x_api_key != API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+        )
 
 
-@app.post("/publish")
+@app.post("/publish", dependencies=[Depends(verify_api_key)])
 async def publish_audio_upload(
-    mode: str = Form(...),  # Should be "upload" for this endpoint.
+    mode: str = Form(...),
     sourceLanguage: str = Form(...),
     audio_file: UploadFile = File(None),
     sampleRate: int = Form(None),
@@ -1811,8 +1820,16 @@ async def serve_admin(request: Request, admin_token: str):
 
 
 @app.get("/upload")
-async def serve_upload(request: Request, streaming: bool = False):
+async def serve_upload(
+    request: Request,
+    api_key: str = Query(None, include_in_schema=False),
+):
     """Serve the main index.html page or streaming-frontend.html if streaming is enabled."""
+    if api_key != API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+        )
     base_url = str(request.base_url).rstrip("/")
     target_languages = admin_config.get("target_languages")
     languages = [
@@ -1825,12 +1842,11 @@ async def serve_upload(request: Request, streaming: bool = False):
         for lang in Language
         if lang in target_languages
     ]
-    # Prepare template context
     context = {
         "request": request,
         "api_base_url": base_url,
-        "languages": languages,  # TODO: display all languages in language-selector
-        # TODO: check if it's automatically uploading when start is activated, configure how long is each clip
+        "languages": languages,
+        "api_key": api_key,
     }
     return templates.TemplateResponse("upload-frontend.html", context)
 
