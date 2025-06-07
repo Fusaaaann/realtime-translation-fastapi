@@ -4,7 +4,6 @@ import secrets
 from scipy import signal
 import threading
 import wave
-import sounddevice as sd
 import asyncio
 import base64
 import json
@@ -22,6 +21,7 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, Depe
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from fastapi.templating import Jinja2Templates
+import sounddevice as sd
 import uvicorn
 import openai
 
@@ -555,69 +555,98 @@ class ContinuousAudioRecorder:
                 logger.info("Audio recording thread stopping before stream creation")
                 return
 
+            # Pre-allocate variables to avoid allocations in callback
+            overflow_count = 0
+            last_overflow_log = 0
+
             # Define optimized callback function for the stream
             def callback(indata, frames, time_info, status):
+                nonlocal overflow_count, last_overflow_log
+
+                # Handle status warnings with rate limiting
                 if status:
-                    logger.warning(f"Audio callback status: {status}")
+                    current_time = time.time()
+                    if "input overflow" in str(status).lower():
+                        overflow_count += 1
+                        # Only log every 10 overflows or every 5 seconds
+                        if overflow_count % 10 == 1 or (current_time - last_overflow_log) > 5.0:
+                            logger.warning(f"Audio input overflow detected (count: {overflow_count})")
+                            last_overflow_log = current_time
+                    else:
+                        logger.warning(f"Audio callback status: {status}")
 
-                # Minimize lock hold time - only for critical buffer operations
+                # Quick exit check without any processing
+                if not self._running:
+                    return
+
                 try:
-                    # Quick running check without lock first
-                    if not self._running:
-                        return
-
-                    # Apply noise filtering outside of lock
+                    # Apply noise filtering - do this as efficiently as possible
                     filtered_audio = self._apply_noise_filter(indata)
 
-                    # Acquire lock only for buffer operations with timeout
-                    if self.lock.acquire(timeout=0.01):  # 10ms timeout
+                    # Use non-blocking lock with immediate fallback
+                    if self.lock.acquire(blocking=False):
                         try:
+                            # Double-check running state
                             if not self._running:
                                 return
 
-                            # Fast buffer operations
-                            frames_to_end = self.buffer_size - self.buffer_index
-                            if frames <= frames_to_end:
-                                self.buffer[self.buffer_index : self.buffer_index + frames] = filtered_audio
-                                self.buffer_index = (self.buffer_index + frames) % self.buffer_size
+                            # Optimized circular buffer write
+                            start_idx = self.buffer_index
+                            end_idx = start_idx + frames
+
+                            if end_idx <= self.buffer_size:
+                                # Simple case: no wraparound
+                                self.buffer[start_idx:end_idx] = filtered_audio
+                                self.buffer_index = end_idx % self.buffer_size
                             else:
-                                self.buffer[self.buffer_index :] = filtered_audio[:frames_to_end]
-                                self.buffer[0 : frames - frames_to_end] = filtered_audio[frames_to_end:]
-                                self.buffer_index = frames - frames_to_end
+                                # Wraparound case
+                                first_chunk = self.buffer_size - start_idx
+                                self.buffer[start_idx:] = filtered_audio[:first_chunk]
+                                self.buffer[: frames - first_chunk] = filtered_audio[first_chunk:]
+                                self.buffer_index = frames - first_chunk
+
                         finally:
                             self.lock.release()
                     else:
-                        # Log lock contention but don't drop audio
-                        logger.debug("Audio callback lock timeout - potential contention")
+                        # Don't log in callback - just drop this chunk silently
+                        # Logging in audio callback can cause more delays
+                        pass
 
-                except Exception as e:
-                    logger.error(f"Error in audio callback: {e}")
+                except Exception:
+                    # Minimal error handling in callback
+                    pass
 
-                # Signal new audio outside of main lock
+                # Simplified async signaling - don't wait for result
                 if self.audio_update_event is not None:
                     try:
                         loop = asyncio.get_event_loop()
                         if loop and not loop.is_closed():
-                            future = asyncio.run_coroutine_threadsafe(self._signal_new_audio(), loop)
-                            future.add_done_callback(lambda f: logger.error(f"Signal error: {f.exception()}") if f.exception() else None)
-                    except RuntimeError:
+                            # Fire and forget - don't add callback handlers
+                            asyncio.run_coroutine_threadsafe(self._signal_new_audio(), loop)
+                    except (RuntimeError, AttributeError):
                         pass
 
-            # Start the input stream
+            # Calculate optimal blocksize based on sample rate
+            # Larger blocksize = fewer callbacks = less overhead
+            optimal_blocksize = int(self.sample_rate * 0.2)  # 200ms chunks instead of 100ms
+
+            # Start the input stream with optimized parameters
             with sd.InputStream(
                 samplerate=self.sample_rate,
                 channels=self.channels,
                 dtype="int16",
                 callback=callback,
-                blocksize=int(self.sample_rate * 0.1),  # Process in 100ms chunks
+                blocksize=optimal_blocksize,  # Increased from 100ms to 200ms
                 device=self.device_id,
+                latency="low",  # Request low latency mode
+                extra_settings=sd.AsioSettings(channel_selectors=[0]) if hasattr(sd, "AsioSettings") else None,
             ) as stream:
                 self.stream = stream
-                logger.info(f"Started continuous audio stream at {self.sample_rate}Hz")
+                logger.info(f"Started continuous audio stream at {self.sample_rate}Hz with {optimal_blocksize} sample blocks")
 
                 # Keep the stream running until self._running becomes False
                 while self._running:
-                    sd.sleep(100)  # Sleep for 100ms
+                    sd.sleep(200)  # Increased sleep time to reduce thread overhead
 
         except Exception as e:
             logger.error(f"Error in audio recording thread: {str(e)}")

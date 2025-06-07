@@ -5,3 +5,5 @@ fastapi
 uvicorn
 openai
 pytest-asyncio
+jinja2
+python-multipart
