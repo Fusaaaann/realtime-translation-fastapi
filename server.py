@@ -408,16 +408,14 @@ class ContinuousAudioRecorder:
 
             try:
                 self._starting = True
-
-                # Initialize async components if not already done
                 self._initialize_async_components()
 
                 # Start the recording thread
                 self.thread = threading.Thread(target=self._record_thread, daemon=True)
                 self.thread.start()
 
-                # Wait a moment to ensure thread starts properly
-                time.sleep(0.1)
+                # Wait longer for complex audio setup - increased from 0.1 to 0.5
+                time.sleep(0.5)
 
                 if self.thread.is_alive():
                     self._running = True
@@ -522,6 +520,7 @@ class ContinuousAudioRecorder:
     def _record_thread(self):
         """Background thread that continuously records audio into the circular buffer."""
         try:
+            logger.info("Starting audio recording thread initialization")
             # List available devices for debugging
             devices = sd.query_devices()
             logger.debug(f"Available audio devices: {len(devices)} devices found")
@@ -540,29 +539,58 @@ class ContinuousAudioRecorder:
                 default_device = sd.query_devices(kind="input")
                 logger.info(f"Using default input device: {default_device['name']}")
 
-            # Define callback function for the stream
+            # Wait for the _running flag to be set by start() method
+            startup_timeout = 10.0  # 10 second timeout for audio setup
+            startup_start = time.time()
+            while not self._running and not self._stopping:
+                if time.time() - startup_start > startup_timeout:
+                    logger.error("Audio recording thread startup timeout - _running flag not set")
+                    return
+                time.sleep(0.01)
+
+            if self._stopping:
+                logger.info("Audio recording thread stopping before stream creation")
+                return
+
+            # Define optimized callback function for the stream
             def callback(indata, frames, time_info, status):
                 if status:
                     logger.warning(f"Audio callback status: {status}")
 
-                with self.lock:
+                # Minimize lock hold time - only for critical buffer operations
+                try:
+                    # Quick running check without lock first
                     if not self._running:
                         return
 
+                    # Apply noise filtering outside of lock
                     filtered_audio = self._apply_noise_filter(indata)
-                    # Calculate how many frames we can write without wrapping
-                    frames_to_end = self.buffer_size - self.buffer_index
-                    if frames <= frames_to_end:
-                        # We can write all frames without wrapping
-                        self.buffer[self.buffer_index : self.buffer_index + frames] = filtered_audio
-                        self.buffer_index = (self.buffer_index + frames) % self.buffer_size
-                    else:
-                        # We need to wrap around the buffer
-                        self.buffer[self.buffer_index :] = filtered_audio[:frames_to_end]
-                        self.buffer[0 : frames - frames_to_end] = filtered_audio[frames_to_end:]
-                        self.buffer_index = frames - frames_to_end
 
-                # Signal that new audio is available (if async components are ready)
+                    # Acquire lock only for buffer operations with timeout
+                    if self.lock.acquire(timeout=0.01):  # 10ms timeout
+                        try:
+                            if not self._running:
+                                return
+
+                            # Fast buffer operations
+                            frames_to_end = self.buffer_size - self.buffer_index
+                            if frames <= frames_to_end:
+                                self.buffer[self.buffer_index : self.buffer_index + frames] = filtered_audio
+                                self.buffer_index = (self.buffer_index + frames) % self.buffer_size
+                            else:
+                                self.buffer[self.buffer_index :] = filtered_audio[:frames_to_end]
+                                self.buffer[0 : frames - frames_to_end] = filtered_audio[frames_to_end:]
+                                self.buffer_index = frames - frames_to_end
+                        finally:
+                            self.lock.release()
+                    else:
+                        # Log lock contention but don't drop audio
+                        logger.debug("Audio callback lock timeout - potential contention")
+
+                except Exception as e:
+                    logger.error(f"Error in audio callback: {e}")
+
+                # Signal new audio outside of main lock
                 if self.audio_update_event is not None:
                     try:
                         loop = asyncio.get_event_loop()
@@ -570,7 +598,6 @@ class ContinuousAudioRecorder:
                             future = asyncio.run_coroutine_threadsafe(self._signal_new_audio(), loop)
                             future.add_done_callback(lambda f: logger.error(f"Signal error: {f.exception()}") if f.exception() else None)
                     except RuntimeError:
-                        # No event loop available, skip async signaling
                         pass
 
             # Start the input stream
@@ -598,6 +625,7 @@ class ContinuousAudioRecorder:
             with self._resource_lock():
                 self._running = False
                 self.stream = None
+            logger.info("Audio recording thread finished")
 
     async def _signal_new_audio(self):
         """Signal that new audio is available with sequence tracking."""
@@ -631,17 +659,35 @@ class ContinuousAudioRecorder:
 
     async def register_consumer(self, consumer_id: str):
         """Register a new audio consumer."""
-        with self.lock:
-            self.consumers.add(consumer_id)
-            self.last_processed_sequences[consumer_id] = 0
-        logger.info(f"Registered audio consumer: {consumer_id}")
+        lock_timeout = 0.1  # Shorter timeout for real-time audio
+        try:
+            if self.lock.acquire(timeout=lock_timeout):
+                try:
+                    self.consumers.add(consumer_id)
+                    self.last_processed_sequences[consumer_id] = 0
+                finally:
+                    self.lock.release()
+                logger.info(f"Registered audio consumer: {consumer_id}")
+            else:
+                logger.warning(f"Failed to register consumer {consumer_id} - lock timeout")
+        except Exception as e:
+            logger.error(f"Error registering consumer {consumer_id}: {e}")
 
     async def unregister_consumer(self, consumer_id: str):
         """Unregister an audio consumer."""
-        with self.lock:
-            self.consumers.discard(consumer_id)
-            self.last_processed_sequences.pop(consumer_id, None)
-        logger.info(f"Unregistered audio consumer: {consumer_id}")
+        lock_timeout = 0.1
+        try:
+            if self.lock.acquire(timeout=lock_timeout):
+                try:
+                    self.consumers.discard(consumer_id)
+                    self.last_processed_sequences.pop(consumer_id, None)
+                finally:
+                    self.lock.release()
+                logger.info(f"Unregistered audio consumer: {consumer_id}")
+            else:
+                logger.warning(f"Failed to unregister consumer {consumer_id} - lock timeout")
+        except Exception as e:
+            logger.error(f"Error unregistering consumer {consumer_id}: {e}")
 
     async def wait_for_new_audio(self, consumer_id: str, timeout=None):
         """
@@ -732,38 +778,50 @@ class ContinuousAudioRecorder:
         """
         frames = int(duration_seconds * self.sample_rate)
 
-        with self.lock:
-            if not self._running:
-                logger.warning("Attempting to get audio from stopped recorder")
-                # Return silence instead of raising an error
+        # Use timeout to prevent indefinite blocking in real-time audio
+        lock_timeout = 0.5  # 500ms timeout for audio access
+        try:
+            if not self.lock.acquire(timeout=lock_timeout):
+                logger.warning(f"Failed to acquire audio lock within {lock_timeout}s timeout")
+                # Return silence as fallback for real-time applications
                 return np.zeros((frames, self.channels), dtype=np.int16)
 
-            # Validate update info if provided
-            if update_info and update_info["buffer_index"] != self.buffer_index:
-                logger.warning("Buffer index mismatch - audio may be inconsistent")
+            try:
+                if not self._running:
+                    logger.warning("Attempting to get audio from stopped recorder")
+                    return np.zeros((frames, self.channels), dtype=np.int16)
 
-            # Ensure we don't request more frames than we have
-            if frames > self.buffer_size:
-                logger.warning(f"Requested {duration_seconds}s of audio but buffer only holds {self.buffer_size/self.sample_rate}s. Truncating.")
-                frames = self.buffer_size
+                # Validate update info if provided
+                if update_info and update_info["buffer_index"] != self.buffer_index:
+                    logger.warning("Buffer index mismatch - audio may be inconsistent")
 
-            # Calculate the start index for the requested duration
-            start_index = (self.buffer_index - frames) % self.buffer_size
+                # Ensure we don't request more frames than we have
+                if frames > self.buffer_size:
+                    logger.warning(f"Requested {duration_seconds}s of audio but buffer only holds {self.buffer_size/self.sample_rate}s. Truncating.")
+                    frames = self.buffer_size
 
-            # Create a new array for the result
-            result = np.zeros((frames, self.channels), dtype=np.int16)
+                # Calculate the start index for the requested duration
+                start_index = (self.buffer_index - frames) % self.buffer_size
 
-            # Copy data from the circular buffer to the result array
-            if start_index < self.buffer_index:
-                # No wrap-around needed
-                result[:] = self.buffer[start_index : self.buffer_index]
-            else:
-                # Need to wrap around the buffer
-                frames_from_end = self.buffer_size - start_index
-                result[:frames_from_end] = self.buffer[start_index:]
-                result[frames_from_end:] = self.buffer[: self.buffer_index]
+                # Create a new array for the result
+                result = np.zeros((frames, self.channels), dtype=np.int16)
 
-            return result
+                # Copy data from the circular buffer to the result array
+                if start_index < self.buffer_index:
+                    result[:] = self.buffer[start_index : self.buffer_index]
+                else:
+                    frames_from_end = self.buffer_size - start_index
+                    result[:frames_from_end] = self.buffer[start_index:]
+                    result[frames_from_end:] = self.buffer[: self.buffer_index]
+
+                return result
+
+            finally:
+                self.lock.release()
+
+        except Exception as e:
+            logger.error(f"Error in get_audio: {e}")
+            return np.zeros((frames, self.channels), dtype=np.int16)
 
     def get_status(self) -> Dict[str, Any]:
         """

@@ -68,6 +68,7 @@ class MockContinuousAudioRecorder:
     def running(self) -> bool:
         """Thread-safe property to check if recorder is running."""
         with self._state_lock:
+            logger.info(f"called MockContinuousAudioRecorder.running, {self._running=}")
             return self._running
 
     @contextmanager
@@ -180,8 +181,8 @@ class MockContinuousAudioRecorder:
                 self.thread = threading.Thread(target=self._mock_record_thread, daemon=True)
                 self.thread.start()
 
-                # Wait a moment to ensure thread starts properly
-                time.sleep(0.1)
+                # Wait longer to ensure thread starts properly and enters main loop
+                time.sleep(0.2)  # Increased from 0.1 to 0.2
 
                 if self.thread.is_alive():
                     self._running = True
@@ -262,10 +263,25 @@ class MockContinuousAudioRecorder:
         try:
             logger.info("Started mock audio recording simulation")
 
+            # Wait for the _running flag to be set by the start() method
+            startup_timeout = 5.0  # 5 second timeout
+            startup_start = time.time()
+            while not self._running and not self._stopping:
+                if time.time() - startup_start > startup_timeout:
+                    logger.error("Mock recording thread startup timeout - _running flag not set")
+                    return
+                time.sleep(0.01)
+
+            if self._stopping:
+                logger.info("Mock recording thread stopping before main loop")
+                return
+
             # Calculate chunk size (simulate 100ms chunks like real recorder)
             chunk_frames = int(self.sample_rate * 0.1)  # 100ms
+            iteration_count = 0
 
             while self._running:
+                # Minimize lock hold time - only lock during buffer operations
                 with self.lock:
                     if not self._running:
                         logger.info("Mock recording thread breaking: _running flag set to False")
@@ -286,7 +302,9 @@ class MockContinuousAudioRecorder:
                         self.buffer[0 : chunk_frames - frames_to_end] = chunk_data[frames_to_end:]
                         self.buffer_index = chunk_frames - frames_to_end
 
-                # Signal that new audio is available (if async components are ready)
+                    iteration_count += 1
+
+                # Signal new audio availability outside of main lock to reduce contention
                 if self.audio_update_event is not None:
                     try:
                         loop = asyncio.get_event_loop()
@@ -295,6 +313,10 @@ class MockContinuousAudioRecorder:
                             future.add_done_callback(lambda f: logger.error(f"Signal error: {f.exception()}") if f.exception() else None)
                     except RuntimeError:
                         pass
+
+                # Log progress periodically (every 2 seconds)
+                if iteration_count % 20 == 0:
+                    logger.debug(f"Mock recording thread processed {iteration_count} chunks")
 
                 # Sleep to simulate real-time audio streaming
                 time.sleep(0.1)  # 100ms chunks
@@ -305,8 +327,10 @@ class MockContinuousAudioRecorder:
 
             logger.error(f"Traceback: {traceback.format_exc()}")
         finally:
+            # Ensure clean state on thread exit
             with self._resource_lock():
                 self._running = False
+            logger.info("Mock recording thread finished")
 
     def _get_next_chunk(self, chunk_frames: int) -> np.ndarray:
         """Get the next chunk of audio data from the test audio, cycling through it."""
@@ -354,17 +378,35 @@ class MockContinuousAudioRecorder:
 
     async def register_consumer(self, consumer_id: str):
         """Register a new audio consumer."""
-        with self.lock:
-            self.consumers.add(consumer_id)
-            self.last_processed_sequences[consumer_id] = 0
-        logger.info(f"Registered mock audio consumer: {consumer_id}")
+        lock_timeout = 0.5  # 500ms timeout for consumer operations
+        try:
+            if self.lock.acquire(timeout=lock_timeout):
+                try:
+                    self.consumers.add(consumer_id)
+                    self.last_processed_sequences[consumer_id] = 0
+                finally:
+                    self.lock.release()
+                logger.info(f"Registered mock audio consumer: {consumer_id}")
+            else:
+                logger.warning(f"Failed to register consumer {consumer_id} - lock timeout")
+        except Exception as e:
+            logger.error(f"Error registering consumer {consumer_id}: {e}")
 
     async def unregister_consumer(self, consumer_id: str):
         """Unregister an audio consumer."""
-        with self.lock:
-            self.consumers.discard(consumer_id)
-            self.last_processed_sequences.pop(consumer_id, None)
-        logger.info(f"Unregistered mock audio consumer: {consumer_id}")
+        lock_timeout = 0.5  # 500ms timeout for consumer operations
+        try:
+            if self.lock.acquire(timeout=lock_timeout):
+                try:
+                    self.consumers.discard(consumer_id)
+                    self.last_processed_sequences.pop(consumer_id, None)
+                finally:
+                    self.lock.release()
+                logger.info(f"Unregistered mock audio consumer: {consumer_id}")
+            else:
+                logger.warning(f"Failed to unregister consumer {consumer_id} - lock timeout")
+        except Exception as e:
+            logger.error(f"Error unregistering consumer {consumer_id}: {e}")
 
     async def wait_for_new_audio(self, consumer_id: str, timeout=None):
         """Wait for new audio with guaranteed delivery."""
@@ -388,10 +430,17 @@ class MockContinuousAudioRecorder:
             else:
                 await self.audio_update_event.wait()
 
-            # Clear event only if all consumers have processed
-            with self.lock:
-                if all(seq >= self.current_sequence for seq in self.last_processed_sequences.values()):
-                    self.audio_update_event.clear()
+            # Clear event only if all consumers have processed - use timeout lock
+            lock_timeout = 0.1  # Short timeout for event clearing
+            try:
+                if self.lock.acquire(timeout=lock_timeout):
+                    try:
+                        if all(seq >= self.current_sequence for seq in self.last_processed_sequences.values()):
+                            self.audio_update_event.clear()
+                    finally:
+                        self.lock.release()
+            except Exception as e:
+                logger.debug(f"Could not clear audio event due to lock contention: {e}")
 
             # Get latest update
             if not self.audio_update_queue.empty():
@@ -435,14 +484,15 @@ class MockContinuousAudioRecorder:
         """Get the most recent audio of the specified duration."""
         frames = int(duration_seconds * self.sample_rate)
 
-        with self.lock:
-            if not self._running:
-                logger.warning("Attempting to get audio from stopped mock recorder")
-                # Return test audio instead of silence for testing purposes
+        # Use timeout to prevent indefinite blocking
+        lock_timeout = 1.0  # 1 second timeout
+        try:
+            if not self.lock.acquire(timeout=lock_timeout):
+                logger.warning(f"Failed to acquire audio lock within {lock_timeout}s timeout")
+                # Return fallback audio data
                 if len(self.test_audio_data) > 0:
                     test_frames = min(frames, len(self.test_audio_data))
                     if test_frames < frames:
-                        # Repeat the test audio to fill the requested duration
                         repeats = (frames // test_frames) + 1
                         repeated_audio = np.tile(self.test_audio_data[:test_frames], (repeats, 1))
                         return repeated_audio[:frames]
@@ -451,32 +501,55 @@ class MockContinuousAudioRecorder:
                 else:
                     return np.zeros((frames, self.channels), dtype=np.int16)
 
-            # Validate update info if provided
-            if update_info and update_info["buffer_index"] != self.buffer_index:
-                logger.debug("Buffer index mismatch in mock recorder - this is expected")
+            try:
+                if not self._running:
+                    logger.warning("Attempting to get audio from stopped mock recorder")
+                    # Return test audio instead of silence for testing purposes
+                    if len(self.test_audio_data) > 0:
+                        test_frames = min(frames, len(self.test_audio_data))
+                        if test_frames < frames:
+                            # Repeat the test audio to fill the requested duration
+                            repeats = (frames // test_frames) + 1
+                            repeated_audio = np.tile(self.test_audio_data[:test_frames], (repeats, 1))
+                            return repeated_audio[:frames]
+                        else:
+                            return self.test_audio_data[:frames]
+                    else:
+                        return np.zeros((frames, self.channels), dtype=np.int16)
 
-            # Ensure we don't request more frames than we have
-            if frames > self.buffer_size:
-                logger.warning(f"Requested {duration_seconds}s of audio but buffer only holds {self.buffer_size/self.sample_rate}s. Truncating.")
-                frames = self.buffer_size
+                # Validate update info if provided
+                if update_info and update_info["buffer_index"] != self.buffer_index:
+                    logger.debug("Buffer index mismatch in mock recorder - this is expected")
 
-            # Calculate the start index for the requested duration
-            start_index = (self.buffer_index - frames) % self.buffer_size
+                # Ensure we don't request more frames than we have
+                if frames > self.buffer_size:
+                    logger.warning(f"Requested {duration_seconds}s of audio but buffer only holds {self.buffer_size/self.sample_rate}s. Truncating.")
+                    frames = self.buffer_size
 
-            # Create a new array for the result
-            result = np.zeros((frames, self.channels), dtype=np.int16)
+                # Calculate the start index for the requested duration
+                start_index = (self.buffer_index - frames) % self.buffer_size
 
-            # Copy data from the circular buffer to the result array
-            if start_index < self.buffer_index:
-                # No wrap-around needed
-                result[:] = self.buffer[start_index : self.buffer_index]
-            else:
-                # Need to wrap around the buffer
-                frames_from_end = self.buffer_size - start_index
-                result[:frames_from_end] = self.buffer[start_index:]
-                result[frames_from_end:] = self.buffer[: self.buffer_index]
+                # Create a new array for the result
+                result = np.zeros((frames, self.channels), dtype=np.int16)
 
-            return result
+                # Copy data from the circular buffer to the result array
+                if start_index < self.buffer_index:
+                    # No wrap-around needed
+                    result[:] = self.buffer[start_index : self.buffer_index]
+                else:
+                    # Need to wrap around the buffer
+                    frames_from_end = self.buffer_size - start_index
+                    result[:frames_from_end] = self.buffer[start_index:]
+                    result[frames_from_end:] = self.buffer[: self.buffer_index]
+
+                return result
+
+            finally:
+                self.lock.release()
+
+        except Exception as e:
+            logger.error(f"Error in get_audio: {e}")
+            return np.zeros((frames, self.channels), dtype=np.int16)
 
     def get_status(self) -> Dict[str, Any]:
         """Get the current status of the mock audio recorder."""
@@ -557,22 +630,28 @@ def initialize_audio_recorder(sample_rate=16000, device_id=None, buffer_seconds=
     :param device_id: ID of the audio device to use (ignored in mock)
     :param buffer_seconds: Maximum duration of audio to keep in the buffer (seconds)
     """
-    import server  # Import the server module
+    import sys
 
-    logger.info("called mock_audio.initialize_audio_recorder")
-    # Stop existing recorder if running
-    if server.continuous_recorder is not None:
+    server_module = sys.modules.get("server")
+    if server_module is None:
+        logger.error("Server module not found in sys.modules")
+        return False
+
+    # Log what's the existing continuous_recorder before stopping it
+    if hasattr(server_module, "continuous_recorder") and server_module.continuous_recorder is not None:
         logger.info(
-            f"Stopping existing continuous_recorder: {type(server.continuous_recorder).__name__} "
-            f"(running: {getattr(server.continuous_recorder, 'running', 'unknown')}, "
-            f"id: {id(server.continuous_recorder)})"
+            f"Stopping existing continuous_recorder: {type(server_module.continuous_recorder).__name__} "
+            f"(running: {getattr(server_module.continuous_recorder, 'running', 'unknown')}, "
+            f"id: {id(server_module.continuous_recorder)})"
         )
-        if not server.continuous_recorder.stop():
-            logger.warning("Failed to stop existing mock recorder cleanly")
-        server.continuous_recorder = None
+        if not server_module.continuous_recorder.stop():
+            logger.warning("Failed to stop existing recorder cleanly")
+        server_module.continuous_recorder = None
+    else:
+        logger.info("No existing continuous_recorder found in server module")
 
     # Create and start new mock recorder
-    server.continuous_recorder = MockContinuousAudioRecorder(
+    mock_recorder = MockContinuousAudioRecorder(
         sample_rate=sample_rate,
         channels=1,  # Mono audio
         device_id=device_id,
@@ -580,13 +659,15 @@ def initialize_audio_recorder(sample_rate=16000, device_id=None, buffer_seconds=
         test_file="test_audio.wav",
     )
 
-    if server.continuous_recorder.start():
-        logger.info("Initialized global mock continuous audio recorder with test file")
-        logger.info(f"{server.continuous_recorder.running=}")
+    logger.info(f"Created new MockContinuousAudioRecorder: id={id(mock_recorder)}")
+
+    if mock_recorder.start():
+        # Set the server's global variable
+        server_module.continuous_recorder = mock_recorder
+        logger.info("Successfully initialized server.continuous_recorder with MockContinuousAudioRecorder")
         return True
     else:
         logger.error("Failed to start mock continuous audio recorder")
-        server.continuous_recorder = None
         return False
 
 
@@ -598,18 +679,25 @@ async def get_audio_frames(duration_seconds: float, update_info: dict = None) ->
     :param update_info: Optional update info from wait_for_new_audio for consistency
     :return: Tuple of (audio data as numpy array, sample rate)
     """
-    import server
+    # Avoid cyclic import by accessing server module from sys.modules
+    import sys
     import wave
     import os
 
+    server_module = sys.modules.get("server")
+    if server_module is None:
+        logger.error("Server module not found in sys.modules")
+        empty_audio = np.zeros((int(duration_seconds * 16000), 1), dtype=np.int16)
+        return empty_audio, 16000
+
     # Show the result of each expression for debugging
-    recorder_exists = server.continuous_recorder is not None
-    recorder_running = server.continuous_recorder.running if recorder_exists else False
+    recorder_exists = hasattr(server_module, "continuous_recorder") and server_module.continuous_recorder is not None
+    recorder_running = server_module.continuous_recorder.running if recorder_exists else False
 
     logger.info(f"get_audio_frames called: duration={duration_seconds}s, " f"recorder_exists={recorder_exists}, recorder_running={recorder_running}")
 
     if recorder_exists:
-        logger.info(f"Recorder type: {type(server.continuous_recorder).__name__}, " f"id: {id(server.continuous_recorder)}")
+        logger.info(f"Recorder type: {type(server_module.continuous_recorder).__name__}, " f"id: {id(server_module.continuous_recorder)}")
 
     if not recorder_exists or not recorder_running:
         logger.error(f"Mock continuous audio recorder check failed: " f"recorder_exists={recorder_exists}, recorder_running={recorder_running}")
@@ -618,8 +706,8 @@ async def get_audio_frames(duration_seconds: float, update_info: dict = None) ->
         return empty_audio, 16000
 
     # Get the audio data from the mock recorder with optional update validation
-    audio_data = server.continuous_recorder.get_audio(duration_seconds, update_info)
-    sample_rate = server.continuous_recorder.sample_rate
+    audio_data = server_module.continuous_recorder.get_audio(duration_seconds, update_info)
+    sample_rate = server_module.continuous_recorder.sample_rate
 
     # Save audio to debug_{timestamp}.wav for debugging
     try:
