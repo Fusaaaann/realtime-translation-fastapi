@@ -1808,7 +1808,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/")
 async def serve_index(request: Request, streaming: bool = False):
     """Serve the main index.html page or streaming-frontend.html if streaming is enabled."""
-    base_url = f"{request.url.scheme}://{request.url.netloc}"
+    forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    base_url = f"{forwarded_proto}://{request.url.netloc}"
     target_languages = admin_config.get("target_languages")
     languages = [
         {
@@ -1835,8 +1836,8 @@ async def serve_index(request: Request, streaming: bool = False):
 @app.get("/admin")
 async def serve_admin(request: Request, admin_token: str):
     """Serve the admin frontend page with current configuration."""
-    # Get the current server base URL
-    base_url = f"{request.url.scheme}://{request.url.netloc}"
+    forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    base_url = f"{forwarded_proto}://{request.url.netloc}"
     if admin_token != admin_config.get("admin_token"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
     # Prepare template context
@@ -1862,7 +1863,8 @@ async def serve_upload(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key",
         )
-    base_url = f"{request.url.scheme}://{request.url.netloc}"
+    forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    base_url = f"{forwarded_proto}://{request.url.netloc}"
     target_languages = admin_config.get("target_languages")
     languages = [
         {
