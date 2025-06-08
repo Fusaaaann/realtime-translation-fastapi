@@ -1,4 +1,9 @@
+import json
+import os
 from enum import Enum
+import threading
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 
 class Language(Enum):
@@ -116,77 +121,62 @@ DEFAULT_MESSAGES = {
     "switching": "Switching language... waiting for new captions",
     "instructions": "Click anywhere to enable audio playback",
 }
-translation_prompt = {
-    (Language.ENGLISH, Language.CHINESE): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from English to Chinese. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.ENGLISH, Language.VIETNAMESE): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from English to Vietnamese. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.ENGLISH, Language.THAI): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from English to Thai. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.CHINESE, Language.ENGLISH): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from Chinese to English. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.CHINESE, Language.VIETNAMESE): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from Chinese to Vietnamese. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.CHINESE, Language.THAI): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from Chinese to Thai. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.VIETNAMESE, Language.ENGLISH): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from Vietnamese to English. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.VIETNAMESE, Language.CHINESE): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from Vietnamese to Chinese. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.VIETNAMESE, Language.THAI): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from Vietnamese to Thai. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.THAI, Language.ENGLISH): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from Thai to English. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.THAI, Language.CHINESE): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from Thai to Chinese. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-    (Language.THAI, Language.VIETNAMESE): (
-        "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. "
-        "First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. "
-        "Then, translate the cleaned text accurately from Thai to Vietnamese. "
-        "Provide only the final translated text:\n\n${text}"
-    ),
-}
+
+
+translation_prompt = {}
+PROMPT_FILE = os.path.join(os.path.dirname(__file__), "prompt.json")
+
+
+def convert_key(key_str):
+    # Convert "ENGLISH-CHINESE" into (Language.ENGLISH, Language.CHINESE)
+    source, target = key_str.split("-")
+    return (getattr(Language, source.strip()), getattr(Language, target.strip()))
+
+
+def load_prompt(file_path=PROMPT_FILE):
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"Error loading prompt from {file_path}: {e}")
+        return
+
+    # Assuming translation_prompt is a global dict where the keys are tuples.
+    translation_prompt.clear()
+    for key_str, prompt in data.items():
+        key = convert_key(key_str)
+        translation_prompt[key] = prompt
+
+    print("Prompt reloaded successfully.")
+
+
+class PromptFileEventHandler(FileSystemEventHandler):
+    def __init__(self, file_path=PROMPT_FILE):
+        self._file_path = file_path
+
+    def on_modified(self, event):
+        # When the file is modified, reload the prompt.
+        if event.src_path.endswith(os.path.basename(self._file_path)):
+            print(f"{self._file_path} has been modified. Reloading prompt...")
+            load_prompt(self._file_path)
+
+
+def start_prompt_watcher(file_path=PROMPT_FILE):
+    """
+    Start watching the prompt JSON file for changes in a separate thread.
+    """
+    event_handler = PromptFileEventHandler(file_path)
+    observer = Observer()
+    directory = os.path.dirname(os.path.abspath(file_path))
+    observer.schedule(event_handler, directory, recursive=False)
+    observer.start()
+    print(f"Started watching {file_path} for changes.")
+
+    thread = threading.Thread(target=observer.join, daemon=True)
+    thread.start()
+    return observer
+
+
+# When the module is imported, load prompt and start the watcher.
+load_prompt(PROMPT_FILE)
+start_prompt_watcher(PROMPT_FILE)
