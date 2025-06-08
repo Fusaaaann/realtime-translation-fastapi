@@ -14,6 +14,20 @@
         .form-group {
             margin-bottom: 15px;
         }
+        .inline-form-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .inline-form-group label {
+            min-width: 200px;
+            margin-bottom: 0;
+        }
+
+        .inline-form-group input {
+            flex: 1;
+        }
         label {
             display: block;
             margin-bottom: 5px;
@@ -256,23 +270,31 @@
         <div class="section-header">Audio Recording Settings</div>
 
         <div class="form-group">
-            <label for="sample_rate">Sample Rate (Hz):</label>
-            <input type="number" id="sample_rate" name="sample_rate" min="8000" max="96000" value="{{ config.sample_rate or 44100 }}">
+            <div class="inline-form-group">
+                <label for="sample_rate">Sample Rate (Hz):</label>
+                <input type="number" id="sample_rate" name="sample_rate" min="8000" max="96000" value="{{ config.sample_rate or 44100 }}">
+            </div>
         </div>
 
         <div class="form-group">
-            <label for="poll_interval">Poll Interval (seconds):</label>
-            <input type="number" id="poll_interval" name="poll_interval" min="1" value="{{ config.poll_interval or 10 }}">
+            <div class="inline-form-group">
+                <label for="poll_interval">Poll Interval (seconds):</label>
+                <input type="number" id="poll_interval" name="poll_interval" min="1" value="{{ config.poll_interval or 10 }}">
+            </div>
         </div>
 
         <div class="form-group">
-            <label for="first_record_seconds">First Record Duration (seconds):</label>
-            <input type="number" id="first_record_seconds" name="first_record_seconds" min="1" value="{{ config.first_record_seconds or 5 }}">
+            <div class="inline-form-group">
+                <label for="first_record_seconds">First Record Duration (seconds):</label>
+                <input type="number" id="first_record_seconds" name="first_record_seconds" min="1" value="{{ config.first_record_seconds or 5 }}">
+            </div>
         </div>
 
         <div class="form-group">
-            <label for="min_audio_duration">Minimum Audio Duration (seconds):</label>
-            <input type="number" id="min_audio_duration" name="min_audio_duration" min="1" value="{{ config.min_audio_duration or 15 }}">
+            <div class="inline-form-group">
+                <label for="min_audio_duration">Minimum Audio Duration (seconds):</label>
+                <input type="number" id="min_audio_duration" name="min_audio_duration" min="1" value="{{ config.min_audio_duration or 15 }}">
+            </div>
         </div>
 
         <button type="submit">Save Configuration</button>
