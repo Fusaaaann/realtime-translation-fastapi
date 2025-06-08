@@ -1586,11 +1586,14 @@ async def update_config(config: dict):
     }
     Note: The "admin_token" value is read-only and cannot be updated via this endpoint.
     """
-    global admin_config, PUBLISH_MODE, DEFAULT_SOURCE_LANGUAGE, TTS_MODEL, STT_MODEL, openai_client, continuous_recorder, audio_processor_task
+    global admin_config, PUBLISH_MODE, DEFAULT_SOURCE_LANGUAGE, TTS_MODEL, STT_MODEL, openai_client, continuous_recorder, audio_processor_task, API_KEY
 
     # Ensure admin_token is not updated
     if "admin_token" in config:
         del config["admin_token"]
+
+    if "api_key" in config:
+        API_KEY = config.pop("api_key")
 
     # Check if publish_mode is changing
     publish_mode_changing = "publish_mode" in config and config["publish_mode"] != admin_config.get("publish_mode")
