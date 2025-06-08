@@ -1813,8 +1813,7 @@ async def serve_index(request: Request, streaming: bool = False):
     languages = [
         {
             "code": lang.value,
-            "name": lang.value.title(),
-            "native_name": lang.native_name,
+            "name": lang.native_name,
             "messages": LOCALIZED_MESSAGES.get(lang.value, DEFAULT_MESSAGES),
         }
         for lang in Language
@@ -1868,8 +1867,7 @@ async def serve_upload(
     languages = [
         {
             "code": lang.value,
-            "name": lang.value.title(),
-            "native_name": lang.native_name,
+            "name": lang.native_name,
             "messages": LOCALIZED_MESSAGES.get(lang.value, DEFAULT_MESSAGES),
         }
         for lang in Language
