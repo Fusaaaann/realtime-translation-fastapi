@@ -301,8 +301,8 @@ def create_visualization_server(evaluation_results: Dict[str, Any]):
     @app.post("/api/rate")
     async def rate_audio(request: Request):
         # This endpoint would handle rating submissions
-        # Implementation would save ratings to a file or database
         data = await request.json()
+        # TODO: modify evaluation_results using data
         return {"status": "success", "message": "Rating saved", "data": data}
 
     return app

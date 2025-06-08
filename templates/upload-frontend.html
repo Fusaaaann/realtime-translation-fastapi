@@ -243,6 +243,9 @@
   </div>
 
   <script>
+    // Recording configuration
+    const CHUNK_DURATION = 5000; // 5 seconds per chunk
+    const SAMPLE_RATE = 16000; // Default sample rate
     const apiBaseUrl = "{{ api_base_url }}";
     
     // Audio recording variables
@@ -271,9 +274,6 @@
     const currentDeviceElement = document.getElementById('current-device');
     const deviceStatusElement = document.getElementById('device-status');
     
-    // Recording configuration
-    const CHUNK_DURATION = 3000; // 3 seconds per chunk
-    const SAMPLE_RATE = 44100; // Default sample rate
     
     /**
      * Get the currently selected language

@@ -1082,7 +1082,7 @@ async def local_audio_source_processor():
     try:
         # Initialize the continuous audio recorder
         device_id = admin_config.get("audio_device_id")
-        sample_rate = admin_config.get("sample_rate", 44100)
+        sample_rate = admin_config.get("sample_rate", 16000)
         buffer_seconds = max(60, admin_config.get("poll_interval", 10) * 3)  # Buffer at least 3x the poll interval
 
         if not initialize_audio_recorder(sample_rate=sample_rate, device_id=device_id, buffer_seconds=buffer_seconds):
@@ -1464,7 +1464,11 @@ async def stream_translated_captions(lang: str, timestamp: float = None):
                     # Send a keep-alive message if no updates
                     yield f"data: {json.dumps([])}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/audio/translated-voice/stream")
@@ -1496,7 +1500,11 @@ async def stream_translated_voice(lang: str, timestamp: float = None):
                     # Send a keep-alive message if no updates
                     yield f"data: {json.dumps([])}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/captions/speaking")
@@ -1662,7 +1670,7 @@ async def update_config(config: dict):
 
         # Get new settings
         device_id = admin_config.get("audio_device_id")
-        sample_rate = admin_config.get("sample_rate", 44100)
+        sample_rate = admin_config.get("sample_rate", 16000)
         buffer_seconds = max(60, admin_config.get("poll_interval", 10) * 3)
 
         if continuous_recorder is not None:
@@ -1761,7 +1769,7 @@ async def control_audio_recorder(action: str):
         elif action == "start":
             # Initialize with current config
             device_id = admin_config.get("audio_device_id")
-            sample_rate = admin_config.get("sample_rate", 44100)
+            sample_rate = admin_config.get("sample_rate", 16000)
             buffer_seconds = max(60, admin_config.get("poll_interval", 10) * 3)
 
             success = initialize_audio_recorder(sample_rate=sample_rate, device_id=device_id, buffer_seconds=buffer_seconds)
