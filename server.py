@@ -1,5 +1,6 @@
 import io
 from contextlib import contextmanager
+import random
 import secrets
 from scipy import signal
 import threading
@@ -25,6 +26,7 @@ import uvicorn
 import openai
 
 from i18n import DEFAULT_MESSAGES, LOCALIZED_MESSAGES, Language, translation_prompt
+from utils import ConversationCache, SessionArchiver
 
 ###############################################################################
 # Admin Configuration Management
@@ -312,13 +314,28 @@ def translate_text(source_text: str, source_lang: str, target_lang: str) -> str:
     return translated_text
 
 
-def text_to_speech(text: str, target_lang: str) -> bytes:
+conversation_cache = ConversationCache()
+session_archiver = SessionArchiver()
+
+
+def cache_translation(speech_id: str, language: str, translated_text: str):
+    """Cache a translation for better TTS continuity."""
+    conversation_cache.cache_translation(speech_id, language, translated_text)
+
+
+def get_previous_translation(speech_id: str, language: str) -> str:
+    """Get previous translation for TTS context."""
+    return conversation_cache.get_previous_translation(speech_id, language)
+
+
+def text_to_speech(text: str, target_lang: str, speech_id: str = None) -> bytes:
+    previous_text = get_previous_translation(speech_id, target_lang) if speech_id else ""
     response_stream = client.text_to_speech.stream_with_timestamps(
         voice_id="JBFqnCBsd6RMkjVDRZzb",
         output_format="mp3_44100_128",
         text=text,
         model_id=TTS_MODEL,
-        # previous_text="", # TODO: get previous text from conversation
+        previous_text=previous_text,
     )
     chunks = []
     for chunk in response_stream:
@@ -1094,6 +1111,7 @@ async def local_audio_source_processor():
 
         # First-time initialization
         first_run = True
+        speech_counter = 0
 
         while True:
             try:
@@ -1111,6 +1129,10 @@ async def local_audio_source_processor():
                     # Get configuration parameters
                     poll_interval = admin_config.get("poll_interval", 10)
                     min_audio_duration = admin_config.get("min_audio_duration", 15)
+
+                    # Generate speech ID for this recording
+                    speech_counter += 1
+                    speech_id = f"recorded-{int(time.time())}-{speech_counter}"
 
                     # On first run, use a shorter recording time for quick startup
                     # On subsequent runs, align recording time with poll interval
@@ -1167,6 +1189,14 @@ async def local_audio_source_processor():
                         wav_file.setframerate(16000)
                         wav_file.writeframes(padded_audio_np.tobytes())  # Single conversion to bytes
 
+                    # Also create original audio data for archiving (before padding)
+                    original_audio_buffer = io.BytesIO()
+                    with wave.open(original_audio_buffer, "wb") as wav_file:
+                        wav_file.setnchannels(1)
+                        wav_file.setsampwidth(2)  # 16-bit audio
+                        wav_file.setframerate(16000)
+                        wav_file.writeframes(resampled_audio_np.tobytes())  # Original recording without padding
+
                     audio_buffer.seek(0)  # Rewind to beginning
 
                     # Send to STT API
@@ -1188,12 +1218,32 @@ async def local_audio_source_processor():
                         # Publish the transcription
                         await published_data_store.update_speaking(timestamp, transcribed_text)
 
+                        # Add to conversation history
+                        conversation_cache.add_conversation_entry(speech_id, transcribed_text, DEFAULT_SOURCE_LANGUAGE, timestamp)
+
+                        # Store translations and TTS audio for archiving
+                        translations = {}
+                        tts_audio_data = {}
+
                         # For every target language (skip if source equals target)
                         async def process_language(language: str):
                             translated_text = translate_text(transcribed_text, DEFAULT_SOURCE_LANGUAGE, language)
                             await published_data_store.update_translated(language, timestamp, translated_text)
-                            tts_audio = text_to_speech(translated_text, language)
+
+                            # Cache the translation
+                            cache_translation(speech_id, language, translated_text)
+
+                            # Add to conversation history
+                            conversation_cache.add_conversation_entry(speech_id, translated_text, language, timestamp)
+
+                            # Store for archiving
+                            translations[language] = translated_text
+
+                            tts_audio = text_to_speech(translated_text, language, speech_id)
                             await published_data_store.update_audio(language, timestamp, tts_audio)
+
+                            # Store TTS audio for archiving
+                            tts_audio_data[language] = tts_audio
 
                         # Process languages in parallel but with a limit
                         semaphore = asyncio.Semaphore(2)  # Process at most 2 languages at once
@@ -1205,7 +1255,20 @@ async def local_audio_source_processor():
                         tasks = [bounded_process_language(lang) for lang in admin_config.get("target_languages", [])]
                         await asyncio.gather(*tasks)
 
-                        logger.info(f"Audio published at timestamp {timestamp}")
+                        # Archive the complete recording with all data
+                        original_audio_buffer.seek(0)
+                        original_audio_data = original_audio_buffer.getvalue()
+                        await session_archiver.archive_session_data(
+                            speech_id=speech_id,
+                            transcribed_text=transcribed_text,
+                            source_language=DEFAULT_SOURCE_LANGUAGE,
+                            timestamp=timestamp,
+                            audio_data=original_audio_data,  # Original recording without padding
+                            translations=translations,
+                            tts_audio_data=tts_audio_data,  # All TTS audio files
+                        )
+
+                        logger.info(f"Audio published at timestamp {timestamp} with speech_id {speech_id}")
                     else:
                         logger.info("No speech detected in the recording, skipping processing")
 
@@ -1268,7 +1331,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on server shutdown."""
-    global continuous_recorder, audio_processor_task
+    global continuous_recorder, audio_processor_task, session_archiver
 
     logger.info("Server shutting down")
 
@@ -1292,6 +1355,14 @@ async def shutdown_event():
             logger.warning("Failed to stop continuous audio recorder cleanly")
         continuous_recorder = None
 
+    # Finalize session archiving
+    if session_archiver:
+        try:
+            await session_archiver.finalize_session(admin_config)
+            logger.info("Session archiving finalized")
+        except Exception as e:
+            logger.warning(f"Error finalizing session archive: {e}")
+
     logger.info("Server shutdown complete")
 
 
@@ -1306,19 +1377,26 @@ def verify_api_key(x_api_key: str = Header(...)):
         )
 
 
+PUBLISH_SUCCEED_TIMES = 0
+
+
+def p_debug(t):
+    return max(0.5 - 0.01 * t, 0.05)
+
+
 @app.post("/publish", dependencies=[Depends(verify_api_key)])
 async def publish_audio_upload(
-    mode: str = Form(...),
     sourceLanguage: str = Form(...),
     audio_file: UploadFile = File(None),
     sampleRate: int = Form(None),
+    speech_id: str = Form(...),
 ):
     """
     This endpoint is intended for upload mode only.
     In local-audio-source mode, publishing is done via the background task.
     """
-    if mode != "upload":
-        raise HTTPException(status_code=400, detail="This endpoint accepts only upload mode requests.")
+    global PUBLISH_SUCCEED_TIMES
+    speech_id = f"publish-{speech_id}"
 
     if audio_file is None or sampleRate is None:
         raise HTTPException(status_code=400, detail="audio_file and sampleRate are required in upload mode.")
@@ -1360,6 +1438,15 @@ async def publish_audio_upload(
             wav_file.setframerate(16000)
             wav_file.writeframes(padded_audio_np.tobytes())  # Single conversion to bytes
 
+        if random.random() < p_debug(PUBLISH_SUCCEED_TIMES):
+            audio_buffer.seek(0)
+
+            debug_filename = f"debug_audio_{timestamp}.wav"
+
+            with open(debug_filename, "wb") as f:
+                f.write(audio_buffer.getvalue())
+            logger.info(f" Saved audio to {debug_filename}")
+
         audio_buffer.seek(0)  # Rewind to beginning
 
         # Send to STT API
@@ -1383,6 +1470,13 @@ async def publish_audio_upload(
         # Publish the transcription
         await published_data_store.update_speaking(timestamp, transcribed_text)
 
+        # Add to conversation history
+        conversation_cache.add_conversation_entry(speech_id, transcribed_text, sourceLanguage, timestamp)
+
+        # Store translations and TTS audio for archiving
+        translations = {}
+        tts_audio_data = {}
+
         # Process each target language in parallel
         async def process_language(language: str):
             if sourceLanguage.upper() == language.upper():
@@ -1390,8 +1484,21 @@ async def publish_audio_upload(
                 return
             translated_text = translate_text(transcribed_text, sourceLanguage, language)
             await published_data_store.update_translated(language, timestamp, translated_text)
-            tts_audio = text_to_speech(translated_text, language)
+
+            # Cache the translation
+            cache_translation(speech_id, language, translated_text)
+
+            # Add to conversation history
+            conversation_cache.add_conversation_entry(speech_id, translated_text, language, timestamp)
+
+            # Store for archiving
+            translations[language] = translated_text
+
+            tts_audio = text_to_speech(translated_text, language, speech_id)
             await published_data_store.update_audio(language, timestamp, tts_audio)
+
+            # Store TTS audio for archiving
+            tts_audio_data[language] = tts_audio
 
         # Process languages in parallel but with a limit
         semaphore = asyncio.Semaphore(2)  # Process at most 2 languages at once
@@ -1402,6 +1509,19 @@ async def publish_audio_upload(
 
         tasks = [bounded_process_language(lang) for lang in admin_config.get("target_languages", [])]
         await asyncio.gather(*tasks)
+
+        # Archive the complete recording with all data
+        await session_archiver.archive_session_data(
+            speech_id=speech_id,
+            transcribed_text=transcribed_text,
+            source_language=sourceLanguage,
+            timestamp=timestamp,
+            audio_data=audio_data,  # Original uploaded audio
+            translations=translations,
+            tts_audio_data=tts_audio_data,  # All TTS audio files
+        )
+
+        PUBLISH_SUCCEED_TIMES += 1
 
         return {
             "timestamp": timestamp,
@@ -1750,15 +1870,25 @@ async def get_audio_status():
 
 
 @app.post("/admin/audio-control", dependencies=[Depends(verify_admin_token)])
-async def control_audio_recorder(action: str):
+async def control_audio_recorder(action: str, speech_id: str = None):
     """
     Control the audio recorder.
-    Actions: start, stop, restart, status
+    Actions: start, stop, restart, status, increment_speech_id
     """
     global continuous_recorder
 
-    if action not in ["start", "stop", "restart", "status"]:
-        raise HTTPException(status_code=400, detail="Invalid action. Use: start, stop, restart, or status")
+    if action not in ["start", "stop", "restart", "status", "increment_speech_id"]:
+        raise HTTPException(status_code=400, detail="Invalid action. Use: start, stop, restart, status, or increment_speech_id")
+
+    if action == "increment_speech_id":
+        if speech_id:
+            # Mark the speech_id for special handling in the next processing cycle
+            timestamp = int(time.time())
+            recorded_speech_id = f"recorded-{speech_id}-{timestamp}"
+            logger.info(f"recorded speech ID for next recording: {recorded_speech_id}")
+            return {"action": action, "recorded_speech_id": recorded_speech_id, "message": "Speech ID recorded for next recording cycle"}
+        else:
+            return {"action": action, "error": "speech_id parameter required for increment_speech_id action"}
 
     if action == "status":
         return {"action": action, "status": continuous_recorder.get_status() if continuous_recorder else None}

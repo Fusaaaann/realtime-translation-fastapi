@@ -177,9 +177,11 @@
                 <button type="button" id="startAudioBtn">Start Audio</button>
                 <button type="button" id="stopAudioBtn">Stop Audio</button>
                 <button type="button" id="restartAudioBtn">Restart Audio</button>
+                <button type="button" id="incrementSpeechIdBtn">Mark Speech ID</button>
             </div>
         </div>
     </div>
+
 
     <button type="button" class="collapsible">Audio Device Selection</button>
     <div class="content">
@@ -379,23 +381,34 @@
             }
         }
 
-        async function controlAudioRecorder(action) {
+        async function controlAudioRecorder(action, speechId = null) {
             try {
                 const headers = {
                     'Content-Type': 'application/json',
                     ...getAuthHeader()
                 };
                 
-                const response = await fetch(`${apiBaseUrl}/admin/audio-control?action=${action}`, {
+                let url = `${apiBaseUrl}/admin/audio-control`;
+                const params = new URLSearchParams({ action });
+                if (speechId) {
+                    params.append('speech_id', speechId);
+                }
+                url += `?${params.toString()}`;
+                
+                const response = await fetch(url, {
                     method: 'POST',
                     headers: headers
                 });
                 
                 if (response.ok) {
                     const result = await response.json();
-                    showMessage(`Audio ${action} ${result.success ? 'successful' : 'failed'}`, result.success ? 'success' : 'error');
-                    if (result.status) {
-                        updateAudioStatusDisplay({ audio_recorder: result.status });
+                    if (action === 'increment_speech_id') {
+                        showMessage(`Speech ID marked: ${result.marked_speech_id || 'Success'}`, 'success');
+                    } else {
+                        showMessage(`Audio ${action} ${result.success ? 'successful' : 'failed'}`, result.success ? 'success' : 'error');
+                        if (result.status) {
+                            updateAudioStatusDisplay({ audio_recorder: result.status });
+                        }
                     }
                 } else {
                     showMessage(`Failed to ${action} audio recorder`, 'error');
@@ -403,6 +416,14 @@
             } catch (error) {
                 console.error(`Error ${action} audio recorder:`, error);
                 showMessage(`Error ${action} audio recorder: ${error.message}`, 'error');
+            }
+        }
+
+        async function incrementSpeechId() {
+            const speechId = prompt('Enter speech ID to mark (optional):');
+            if (speechId !== null) { // User didn't cancel
+                const finalSpeechId = speechId.trim() || `manual-${Date.now()}`;
+                await controlAudioRecorder('increment_speech_id', finalSpeechId);
             }
         }
 
@@ -506,6 +527,7 @@
         document.getElementById('startAudioBtn').addEventListener('click', () => controlAudioRecorder('start'));
         document.getElementById('stopAudioBtn').addEventListener('click', () => controlAudioRecorder('stop'));
         document.getElementById('restartAudioBtn').addEventListener('click', () => controlAudioRecorder('restart'));
+        document.getElementById('incrementSpeechIdBtn').addEventListener('click', incrementSpeechId);
         document.getElementById('refreshDevicesBtn').addEventListener('click', loadAudioDevices);
         document.getElementById('changeAudioDeviceBtn').addEventListener('click', changeAudioDevice);
 
