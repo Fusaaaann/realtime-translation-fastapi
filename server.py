@@ -21,7 +21,6 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, Depe
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from fastapi.templating import Jinja2Templates
-import sounddevice as sd
 import uvicorn
 import openai
 
@@ -319,7 +318,7 @@ def text_to_speech(text: str, target_lang: str) -> bytes:
         output_format="mp3_44100_128",
         text=text,
         model_id=TTS_MODEL,
-        # previous_text="", # TODO: support previous_text by storing previous translated clip
+        # previous_text="", # TODO: get previous text from conversation
     )
     chunks = []
     for chunk in response_stream:
@@ -523,6 +522,8 @@ class ContinuousAudioRecorder:
     def _record_thread(self):
         """Background thread that continuously records audio into the circular buffer."""
         try:
+            import sounddevice as sd
+
             logger.info("Starting audio recording thread initialization")
             # List available devices for debugging
             devices = sd.query_devices()
@@ -540,6 +541,7 @@ class ContinuousAudioRecorder:
             # If device_id is None or invalid, use the default input device
             if device_info is None:
                 default_device = sd.query_devices(kind="input")
+                self.device_id["index"]
                 logger.info(f"Using default input device: {default_device['name']}")
 
             # Wait for the _running flag to be set by start() method
@@ -1782,6 +1784,8 @@ async def list_audio_devices():
     List all available audio input devices.
     """
     try:
+        import sounddevice as sd
+
         devices = sd.query_devices()
         input_devices = []
 
@@ -1789,7 +1793,7 @@ async def list_audio_devices():
             if device.get("max_input_channels", 0) > 0:
                 input_devices.append(
                     {
-                        "id": i,
+                        "id": device.get("index", i),
                         "name": device.get("name", f"Device {i}"),
                         "channels": device.get("max_input_channels"),
                         "default_samplerate": device.get("default_samplerate"),
@@ -1840,6 +1844,13 @@ async def serve_admin(request: Request, admin_token: str):
     base_url = f"{forwarded_proto}://{request.url.netloc}"
     if admin_token != admin_config.get("admin_token"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    languages = [
+        {
+            "code": lang.value,
+            "name": lang.value.title(),
+        }
+        for lang in Language
+    ]
     # Prepare template context
     context = {
         "request": request,
@@ -1847,6 +1858,7 @@ async def serve_admin(request: Request, admin_token: str):
         "api_base_url": base_url,
         "admin_token": admin_token,
         "api_key": API_KEY,
+        "languages": languages,
     }
 
     return templates.TemplateResponse("admin-frontend.html", context)

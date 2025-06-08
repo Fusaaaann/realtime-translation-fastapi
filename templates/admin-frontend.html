@@ -174,12 +174,12 @@
             <select id="availableDevices" name="availableDevices">
                 <option value="">Loading devices...</option>
             </select>
-            <button type="button" id="refreshDevicesBtn">Refresh Devices</button>
+            <div style="margin-top: 10px;">
+                <button type="button" id="refreshDevicesBtn">Refresh Devices</button>
+                <button type="button" id="changeAudioDeviceBtn">Change Audio Device</button>
+            </div>
         </div>
-        <div id="deviceInfo" style="margin-top: 10px; padding: 10px; background-color: #f9f9f9; border-radius: 4px; display: none;">
-            <strong>Device Details:</strong>
-            <div id="deviceDetails"></div>
-        </div>
+
     </div>
     <div class="form-group">
         <label>Server's API key:</label>
@@ -203,23 +203,26 @@
         <div class="form-group">
             <label for="default_source_language">Default Source Language:</label>
             <select id="default_source_language" name="default_source_language">
-                <!--TODO:use jinja placeholder for server to render Language    -->
-                <!-- 
-                    <option value="CHINESE">Chinese</option>
-                    <option value="ENGLISH">English</option>
-                    <option value="THAI">Thai</option>
-                -->
+                {% for language in languages %}
+                <option value="{{ language.code }}" 
+                        {{ 'selected' if language.code == config.default_source_language else '' }}>
+                    {{ language.name }}
+                </option>
+                {% endfor %}
             </select>
         </div>
+
 
         <div class="form-group">
             <label>Target Languages:</label>
             <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-                <!--TODO:use jinja placeholder for server to render Language     enum-->
-                <!-- <div style="display: flex; align-items: center;">
-                    <input type="checkbox" id="english" value="ENGLISH" {{ 'checked' if 'ENGLISH' in (config.target_languages or []) else '' }}> 
-                    <label for="english" style="margin-left: 5px; display: inline;">English</label>
-                </div> -->
+                {% for language in languages %}
+                <div style="display: flex; align-items: center;">
+                    <input type="checkbox" id="{{ language.code }}" value="{{ language.code }}" 
+                        {{ 'checked' if language.code in (config.target_languages or []) else '' }}> 
+                    <label for="{{ language.code }}" style="margin-left: 5px; display: inline;">{{ language.name }}</label>
+                </div>
+                {% endfor %}
             </div>
         </div>
 
@@ -251,10 +254,6 @@
         </div>
 
         <div class="section-header">Audio Recording Settings</div>
-        <div class="form-group">
-            <label for="audio_device_id">Audio Device ID (leave empty for default):</label>
-            <input type="text" id="audio_device_id" name="audio_device_id" placeholder="Optional" value="{{ config.audio_device_id or '' }}">
-        </div>
 
         <div class="form-group">
             <label for="sample_rate">Sample Rate (Hz):</label>
@@ -427,23 +426,56 @@
             });
         }
 
-        function showDeviceDetails() {
+
+        // Add this function to your existing script
+        async function changeAudioDevice() {
             const select = document.getElementById('availableDevices');
-            const deviceInfo = document.getElementById('deviceInfo');
-            const deviceDetails = document.getElementById('deviceDetails');
+            const selectedDeviceId = select.value;
             
-            if (select.value) {
-                deviceDetails.innerHTML = `
-                    <div>Device ID: ${select.value}</div>
-                    <div>Selected for configuration</div>
-                `;
-                deviceInfo.style.display = 'block';
+            if (!selectedDeviceId && selectedDeviceId !== "") {
+                showMessage('Please select an audio device first', 'error');
+                return;
+            }
+            
+            try {
+                const headers = {
+                    'Content-Type': 'application/json',
+                    ...getAuthHeader()
+                };
                 
-                // Update the audio_device_id field
-                document.getElementById('audio_device_id').value = select.value;
-            } else {
-                deviceInfo.style.display = 'none';
-                document.getElementById('audio_device_id').value = '';
+                const requestBody = {
+                    audio_device_id: selectedDeviceId || null
+                };
+                
+                const response = await fetch(`${apiBaseUrl}/admin/config`, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(requestBody)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.success) {
+                        showMessage(`Audio device changed successfully to: ${selectedDeviceId || 'Default Device'}`, 'success');
+                        
+                        // Update the audio_device_id field in the form
+                        document.getElementById('audio_device_id').value = selectedDeviceId || '';
+                        
+                        // Refresh audio status to show the new device
+                        setTimeout(refreshAudioStatus, 1000);
+                        
+                        // Optionally reload devices list to update current selection
+                        setTimeout(loadAudioDevices, 1500);
+                    } else {
+                        showMessage(`Failed to change audio device: ${result.message || 'Unknown error'}`, 'error');
+                    }
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    showMessage(`Failed to change audio device: ${errorData.message || response.statusText}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error changing audio device:', error);
+                showMessage(`Error changing audio device: ${error.message}`, 'error');
             }
         }
 
@@ -453,16 +485,16 @@
         document.getElementById('stopAudioBtn').addEventListener('click', () => controlAudioRecorder('stop'));
         document.getElementById('restartAudioBtn').addEventListener('click', () => controlAudioRecorder('restart'));
         document.getElementById('refreshDevicesBtn').addEventListener('click', loadAudioDevices);
-        document.getElementById('availableDevices').addEventListener('change', showDeviceDetails);
+        document.getElementById('changeAudioDeviceBtn').addEventListener('click', changeAudioDevice);
 
         document.getElementById('configForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            // Get selected target languages
             const targetLanguages = [];
-            ['english', 'thai', 'chinese', 'vietnamese'].forEach(lang => {
-                if (document.getElementById(lang).checked) {
-                    targetLanguages.push(document.getElementById(lang).value);
+            const languageCheckboxes = document.querySelectorAll('input[type="checkbox"][id]:not([id=""])');
+            languageCheckboxes.forEach(checkbox => {
+                if (checkbox.checked) {
+                    targetLanguages.push(checkbox.value);
                 }
             });
 
@@ -475,7 +507,6 @@
                 publish_mode: document.getElementById('publish_mode').value,
                 tts_model: document.getElementById('tts_model').value,
                 stt_model: document.getElementById('stt_model').value,
-                audio_device_id: document.getElementById('audio_device_id').value || null,
                 sample_rate: parseInt(document.getElementById('sample_rate').value, 10),
                 poll_interval: parseInt(document.getElementById('poll_interval').value, 10),
                 first_record_seconds: parseInt(document.getElementById('first_record_seconds').value, 10),
@@ -517,6 +548,7 @@
                 showMessage(`Error saving configuration: ${error.message}`, 'error');
             }
         });
+
 
         // Export configuration to JSON file
         document.getElementById('exportBtn').addEventListener('click', () => {
@@ -580,13 +612,15 @@
                 document.getElementById('default_source_language').value = config.default_source_language;
             }
             
-            // Target Languages
-            ['english', 'thai', 'chinese', 'vietnamese'].forEach(lang => {
-                document.getElementById(lang).checked = false;
+            // Target Languages - Clear all checkboxes first, then set selected ones
+            const languageCheckboxes = document.querySelectorAll('input[type="checkbox"][id]:not([id=""])');
+            languageCheckboxes.forEach(checkbox => {
+                checkbox.checked = false;
             });
+            
             if (config.target_languages) {
-                config.target_languages.forEach(lang => {
-                    const checkbox = document.getElementById(lang.toLowerCase());
+                config.target_languages.forEach(langCode => {
+                    const checkbox = document.getElementById(langCode);
                     if (checkbox) {
                         checkbox.checked = true;
                     }
