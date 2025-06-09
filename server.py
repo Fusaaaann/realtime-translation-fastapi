@@ -1141,9 +1141,13 @@ async def local_audio_source_processor():
         # Initialize the continuous audio recorder
         device_id = admin_config.get("audio_device_id")
         sample_rate = admin_config.get("sample_rate", 16000)
+        channels = admin_config.get("channels", 1)  # Default mono
+        bits_per_sample = admin_config.get("bits_per_sample", 16)
         buffer_seconds = max(60, admin_config.get("poll_interval", 10) * 3)  # Buffer at least 3x the poll interval
 
-        if not initialize_audio_recorder(sample_rate=sample_rate, device_id=device_id, buffer_seconds=buffer_seconds):
+        if not initialize_audio_recorder(
+            sample_rate=sample_rate, device_id=device_id, buffer_seconds=buffer_seconds, channels=channels, bits_per_sample=bits_per_sample
+        ):
             logger.error("Failed to initialize audio recorder, stopping processor")
             return
 
@@ -1205,8 +1209,30 @@ async def local_audio_source_processor():
                     recording_duration = time.time() - start_time
                     logger.info(f"Audio frames fetched in {recording_duration:.2f}s")
 
+                    try:
+                        # Validate audio data format
+                        if audio_np.dtype != np.int16:
+                            logger.warning(f"Converting audio from {audio_np.dtype} to int16")
+                            audio_np = audio_np.astype(np.int16)
+
+                        # Ensure proper shape for mono audio
+                        if len(audio_np.shape) == 1:
+                            audio_np = audio_np.reshape(-1, 1)
+
+                        logger.debug(f"Audio array shape: {audio_np.shape}")
+                        logger.debug(f"Audio duration: {len(audio_np) / source_sample_rate:.2f} seconds")
+
+                    except ValueError as e:
+                        logger.error(f"Invalid audio data format: {e}")
+                        continue  # Skip this iteration
+
                     # Process the audio - stay in numpy format
+                    # Log original format info (like reference server)
+                    logger.debug(f"Original audio - Sample Rate: {source_sample_rate}, Channels: {channels}, Bits: {bits_per_sample}")
+                    logger.debug(f"Raw audio data: {len(audio_np) * 2} bytes")  # *2 for 16-bit
+
                     resampled_audio_np = resample_audio(audio_np, source_sample_rate, 16000)
+                    logger.debug(f"Resampled shape: {resampled_audio_np.shape}")
 
                     # Pad audio if needed to meet minimum duration - still in numpy format
                     current_duration = len(resampled_audio_np) / 16000  # in seconds
@@ -1229,6 +1255,9 @@ async def local_audio_source_processor():
                         wav_file.setsampwidth(2)  # 16-bit audio
                         wav_file.setframerate(16000)
                         wav_file.writeframes(padded_audio_np.tobytes())  # Single conversion to bytes
+                    logger.debug("Created WAV file - Channels: 1, Sample Width: 2, Frame Rate: 16000")
+                    logger.debug(f"Final audio shape: {padded_audio_np.shape}")
+                    logger.debug(f"Final duration: {len(padded_audio_np) / 16000:.2f}s")
 
                     # Also create original audio data for archiving (before padding)
                     original_audio_buffer = io.BytesIO()
