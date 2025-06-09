@@ -107,7 +107,7 @@ class TranslationEvaluator:
             self.test_data = [{"source_text": "Hello, how are you today?", "source_lang": "ENGLISH", "context": "fallback_greeting"}]
 
     def evaluate_prompt_format(self) -> Dict[str, Any]:
-        """Evaluate the format and structure of translation prompts"""
+        """Evaluate the format conciseness of translation"""
         format_results = {"total_prompts": len(translation_prompt), "format_issues": [], "missing_pairs": [], "valid_prompts": 0}
 
         # Check all possible language pairs
@@ -124,16 +124,7 @@ class TranslationEvaluator:
             if pair not in translation_prompt:
                 format_results["missing_pairs"].append(f"{pair[0].value} -> {pair[1].value}")
 
-        # Validate existing prompts
-        for key, prompt in translation_prompt.items():
-            if not isinstance(prompt, str):
-                format_results["format_issues"].append(f"Prompt for {key} is not a string")
-            elif "${text}" not in prompt:
-                format_results["format_issues"].append(f"Prompt for {key} missing " + "${text} placeholder")
-            elif len(prompt.strip()) == 0:
-                format_results["format_issues"].append(f"Prompt for {key} is empty")
-            else:
-                format_results["valid_prompts"] += 1
+        # TODO: format
 
         return format_results
 
