@@ -1454,11 +1454,46 @@ def p_debug(t):
     return max(0.5 - 0.01 * t, 0.05)
 
 
+def detect_audio_format(header_bytes):
+    """Detect audio format from file header"""
+    if len(header_bytes) < 4:
+        return "unknown"
+
+    # WebM/Matroska
+    if header_bytes[0] == 0x1A and header_bytes[1] == 0x45:
+        return "webm"
+
+    # WAV/RIFF
+    if header_bytes[:4] == b"RIFF":
+        return "wav"
+
+    # MP4/M4A
+    if header_bytes[4:8] == b"ftyp" if len(header_bytes) >= 8 else False:
+        return "mp4"
+
+    # OGG
+    if header_bytes[:4] == b"OggS":
+        return "ogg"
+
+    # MP3
+    if header_bytes[:2] == b"\xff\xfb" or header_bytes[:3] == b"ID3":
+        return "mp3"
+
+    return "unknown"
+
+
+def get_format_from_content_type(content_type):
+    """Get expected format from content type"""
+    format_map = {"audio/webm": "webm", "audio/wav": "wav", "audio/mp4": "mp4", "audio/mpeg": "mp3", "audio/ogg": "ogg"}
+    return format_map.get(content_type, "unknown")
+
+
 @app.post("/publish", dependencies=[Depends(verify_api_key)])
 async def publish_audio_upload(
     sourceLanguage: str = Form(...),
     audio_file: UploadFile = File(None),
     speech_id: str = Form(...),
+    timestamp: int = Form(...),
 ):
     """
     This endpoint is intended for upload mode only.
@@ -1487,7 +1522,50 @@ async def publish_audio_upload(
         # Use original filename or create one with proper extension
         original_filename = audio_file.filename or "audio_chunk.webm"
         content_type = audio_file.content_type or "audio/webm"
-        timestamp = int(time.time())
+
+        # === VERIFICATION POINT 1: Input Data Analysis ===
+        logger.info(f"📥 Input Analysis for speech {speech_id}:")
+        logger.info(f"  Original filename: {original_filename}")
+        logger.info(f"  Content type: {content_type}")
+        logger.info(f"  Data size: {len(audio_data)} bytes")
+        logger.info(f"  Data type: {type(audio_data)}")
+
+        # Check if data is empty
+        if len(audio_data) == 0:
+            logger.error("❌ Empty audio data received!")
+            raise ValueError("Empty audio data")
+
+        # === VERIFICATION POINT 2: File Header Analysis ===
+        header_bytes = audio_data[:16] if len(audio_data) >= 16 else audio_data
+        header_hex = " ".join([f"{b:02x}" for b in header_bytes])
+        logger.info(f"🔍 File header (first 16 bytes): {header_hex}")
+
+        # Detect actual file format from header
+        detected_format = detect_audio_format(header_bytes)
+        logger.info(f"🎵 Detected format from header: {detected_format}")
+
+        # Check format consistency
+        expected_format = get_format_from_content_type(content_type)
+        if detected_format != expected_format and detected_format != "unknown":
+            logger.warning(f"⚠️ Format mismatch: expected {expected_format}, detected {detected_format}")
+
+        # === VERIFICATION POINT 3: File Magic Detection ===
+        import puremagic
+
+        try:
+            detected_mime = puremagic.from_stream(audio_data, mime=True)
+            detected_type = puremagic.from_stream(audio_data)
+            logger.info(f"🔮 Magic detection - MIME: {detected_mime}, Type: {detected_type}")
+
+            if detected_mime != content_type:
+                logger.warning(f"⚠️ MIME type mismatch: received {content_type}, detected {detected_mime}")
+        except Exception as magic_error:
+            logger.warning(f"⚠️ Magic detection failed: {magic_error}")
+        import hashlib
+
+        # === VERIFICATION POINT 4: Data Integrity Check ===
+        data_hash = hashlib.md5(audio_data).hexdigest()
+        logger.info(f"🔐 Data MD5 hash: {data_hash}")
 
         # Debug file saving
         if random.random() < p_debug(PUBLISH_SUCCEED_TIMES):
@@ -1516,8 +1594,6 @@ async def publish_audio_upload(
         except Exception as e:
             logger.error(f"STT API error: {e}")
             raise HTTPException(status_code=500, detail=f"STT API error: {str(e)}")
-
-        timestamp = time.time()
 
         # MODIFY: Enhanced empty transcription handling
         if not transcribed_text.strip():

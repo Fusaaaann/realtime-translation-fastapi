@@ -260,6 +260,9 @@
     let isRecording = false;
     let recordingStartTime = null;
     let recordingTimer = null;
+    let headerChunk = null;
+    let isHeaderCaptured = false;
+    let sendChunkInterval = null;
 
     // Statistics
     let chunksSent = 0;
@@ -453,11 +456,151 @@
     }
 
     /**
-     * Send audio chunk to the server - UPDATED with PCM conversion
+     * Verify format and integrity of audio blob
+     */
+    async function verifyAudioBlob(audioBlob) {
+      const verification = {
+        isValid: false,
+        size: audioBlob.size,
+        type: audioBlob.type,
+        hasHeader: false,
+        canPlay: false,
+        duration: null,
+        errors: [],
+        warnings: []
+      };
+
+      try {
+        // Basic checks
+        if (!audioBlob || audioBlob.size === 0) {
+          verification.errors.push('Blob is empty or null');
+          return verification;
+        }
+
+        if (!audioBlob.type) {
+          verification.warnings.push('No MIME type specified');
+        }
+
+        // Size checks
+        if (audioBlob.size < 100) {
+          verification.warnings.push(`Very small blob size: ${audioBlob.size} bytes`);
+        }
+
+        // Read first few bytes to check for valid header
+        const headerBytes = await readBlobBytes(audioBlob, 0, 32);
+        const headerHex = Array.from(headerBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+        console.log(`🔍 Header bytes: ${headerHex}`);
+
+        // Check for WebM header signature
+        if (audioBlob.type.includes('webm')) {
+          // WebM files start with EBML header (0x1A 0x45 0xDF 0xA3)
+          if (headerBytes[0] === 0x1A && headerBytes[1] === 0x45 &&
+            headerBytes[2] === 0xDF && headerBytes[3] === 0xA3) {
+            verification.hasHeader = true;
+            console.log('✅ Valid WebM header detected');
+          } else {
+            verification.warnings.push('WebM header signature not found');
+          }
+        }
+
+        // Try to create audio element to test playability
+        try {
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error('Audio load timeout'));
+            }, 5000);
+
+            audio.onloadedmetadata = () => {
+              clearTimeout(timeout);
+              verification.canPlay = true;
+              verification.duration = audio.duration;
+              console.log(`✅ Audio is playable, duration: ${audio.duration}s`);
+              URL.revokeObjectURL(audioUrl);
+              resolve();
+            };
+
+            audio.onerror = (e) => {
+              clearTimeout(timeout);
+              verification.errors.push(`Audio load error: ${e.message || 'Unknown error'}`);
+              URL.revokeObjectURL(audioUrl);
+              reject(e);
+            };
+
+            audio.load();
+          });
+        } catch (audioError) {
+          verification.warnings.push(`Could not verify playability: ${audioError.message}`);
+        }
+
+        // Check if blob appears to be corrupted (all zeros or repeated patterns)
+        const sampleBytes = await readBlobBytes(audioBlob, Math.min(1000, audioBlob.size - 100), 100);
+        const uniqueBytes = new Set(sampleBytes).size;
+        if (uniqueBytes < 5) {
+          verification.warnings.push('Blob may be corrupted (low byte diversity)');
+        }
+
+        // Overall validity assessment
+        verification.isValid = verification.errors.length === 0 &&
+          verification.size > 0 &&
+          (verification.hasHeader || verification.canPlay);
+
+      } catch (error) {
+        verification.errors.push(`Verification failed: ${error.message}`);
+      }
+
+      return verification;
+    }
+
+    /**
+     * Helper function to read specific bytes from a blob
+     */
+    async function readBlobBytes(blob, start, length) {
+      const slice = blob.slice(start, start + length);
+      const arrayBuffer = await slice.arrayBuffer();
+      return new Uint8Array(arrayBuffer);
+    }
+
+    /**
+     * Enhanced send function with verification
      */
     async function sendAudioChunk(audioBlob) {
       try {
-        uploadStatusElement.textContent = 'Converting...';
+        // Verify blob before sending
+        console.log('🔍 Verifying audio blob...');
+        const verification = await verifyAudioBlob(audioBlob);
+
+        // Log verification results
+        console.log('📋 Blob Verification Results:', {
+          isValid: verification.isValid,
+          size: verification.size,
+          type: verification.type,
+          hasHeader: verification.hasHeader,
+          canPlay: verification.canPlay,
+          duration: verification.duration,
+          errors: verification.errors,
+          warnings: verification.warnings
+        });
+
+        // Handle verification results
+        if (verification.errors.length > 0) {
+          console.error('❌ Blob verification failed:', verification.errors);
+          uploadStatusElement.textContent = 'Invalid Audio';
+          uploadStatusElement.style.color = '#f44336';
+          return;
+        }
+
+        if (verification.warnings.length > 0) {
+          console.warn('⚠️ Blob verification warnings:', verification.warnings);
+        }
+
+        if (!verification.isValid) {
+          console.warn('⚠️ Blob may be invalid, but attempting to send anyway');
+        }
+
+        // uploadStatusElement.textContent = 'Converting...';
         uploadStatusElement.style.color = '#ff9800';
 
         // const pcmBlob = await convertToPCM(audioBlob); // no conversion
@@ -468,6 +611,7 @@
         const getFileExtension = (mimeType) => {
           const mimeToExt = {
             'audio/webm': 'webm',
+            'audio/webm;codecs=opus': 'webm',
             'audio/mp4': 'm4a',
             'audio/mpeg': 'mp3',
             'audio/wav': 'wav',
@@ -477,18 +621,21 @@
         };
 
         const extension = getFileExtension(audioBlob.type);
-        const filename = `audio_chunk.${extension}`;
+        const timestamp = Date.now();
+        const filename = `audio_chunk_${timestamp}.${extension}`;
 
         const formData = new FormData();
         formData.append('sourceLanguage', getSelectedLanguage());
         formData.append('audio_file', audioBlob, filename);
         formData.append('sampleRate', CONFIG.SAMPLE_RATE.toString());
-        formData.append('channels', CONFIG.CHANNELS.toString()); // Added
-        formData.append('bitsPerSample', CONFIG.BITS_PER_SAMPLE.toString()); // Added
+        formData.append('channels', CONFIG.CHANNELS.toString());
+        formData.append('bitsPerSample', CONFIG.BITS_PER_SAMPLE.toString());
         formData.append('speech_id', currentSpeechId);
+        formData.append('timestamp', timestamp.toString());
 
-        // Log what we're sending for debugging
+        // Enhanced logging with verification info
         console.log('📋 FormData contents:');
+        console.log(`  Blob verification: ${verification.isValid ? '✅ Valid' : '⚠️ Questionable'}`);
         for (let [key, value] of formData.entries()) {
           if (value instanceof Blob) {
             console.log(`  ${key}: Blob(${value.size} bytes, ${value.type})`);
@@ -497,10 +644,10 @@
           }
         }
 
-        const response = await fetch(`${CONFIG.API_URL}/publish`, { // Updated to use CONFIG
+        const response = await fetch(`${CONFIG.API_URL}/publish`, {
           method: 'POST',
           headers: {
-            'x-api-key': CONFIG.API_KEY // Updated to use CONFIG
+            'x-api-key': CONFIG.API_KEY
           },
           body: formData,
         });
@@ -512,14 +659,14 @@
           uploadStatusElement.style.color = '#4CAF50';
 
           const result = await response.json();
-          console.log(`✅ PCM chunk sent successfully for speech ${currentSpeechId}:`, result);
+          console.log(`✅ Audio chunk sent successfully for speech ${currentSpeechId}:`, result);
         } else {
           const errorText = await response.text();
           console.error('❌ API Error:', response.status, errorText);
           throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
       } catch (error) {
-        console.error('❌ Error processing/sending audio chunk:', error); // TODO: EncodingError: Unable to decode audio data
+        console.error('❌ Error processing/sending audio chunk:', error);
         uploadStatusElement.textContent = 'Error';
         uploadStatusElement.style.color = '#f44336';
 
@@ -531,13 +678,13 @@
         }
       }
 
-      // Reset upload status after 3 seconds (increased for PCM processing time)
+      // Reset upload status after 3 seconds
       setTimeout(() => {
         if (isRecording) {
           uploadStatusElement.textContent = 'Ready';
           uploadStatusElement.style.color = '#333';
         }
-      }, 3000); // Increased from 2000
+      }, 3000);
     }
 
     /**
@@ -620,22 +767,31 @@
     }
 
     /**
-     * Start continuous audio recording - UPDATED with better audio constraints
+     * Start continuous audio recording - UPDATED with comprehensive event handling
      */
     async function startRecording() {
       try {
         selectedDeviceId = getSelectedDeviceId();
 
-        // Prepare audio constraints - UPDATED
+        // Reset all state variables
+        headerChunk = null;
+        isHeaderCaptured = false;
+
+        // Clear any existing interval
+        if (sendChunkInterval) {
+          clearInterval(sendChunkInterval);
+          sendChunkInterval = null;
+        }
+
+        // Prepare audio constraints
         const audioConstraints = {
-          sampleRate: CONFIG.SAMPLE_RATE, // Use CONFIG
-          channelCount: CONFIG.CHANNELS, // Use CONFIG
+          sampleRate: CONFIG.SAMPLE_RATE,
+          channelCount: CONFIG.CHANNELS,
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true // Added for better audio quality
+          autoGainControl: true
         };
 
-        // Add device ID if specified
         if (selectedDeviceId) {
           audioConstraints.deviceId = {
             exact: selectedDeviceId
@@ -647,75 +803,199 @@
           audio: audioConstraints
         });
 
-        // Create MediaRecorder - UPDATED with better options
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ?
-          'audio/webm;codecs=opus' :
-          'audio/webm';
+        // Determine best supported MIME type
+        const supportedTypes = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/ogg;codecs=opus'
+        ];
 
+        let mimeType = 'audio/webm'; // fallback
+        for (const type of supportedTypes) {
+          if (MediaRecorder.isTypeSupported(type)) {
+            mimeType = type;
+            console.log(`✅ Using MIME type: ${mimeType}`);
+            break;
+          }
+        }
+
+        // Create MediaRecorder with comprehensive options
         mediaRecorder = new MediaRecorder(audioStream, {
           mimeType: mimeType,
-          audioBitsPerSecond: 128000 // Added for consistent quality
+          audioBitsPerSecond: 128000
         });
 
-        // Handle data available event
-        mediaRecorder.ondataavailable = async (event) => { // Made async
-          if (event.data.size > 0) {
-            console.log(`📦 Received audio chunk: ${event.data.size} bytes`);
-            await sendAudioChunk(event.data); // Added await
+        mediaRecorder.ondataavailable = async (event) => {
+          console.log(`🎵 ondataavailable triggered - Size: ${event.data.size} bytes, Type: ${event.data.type}`);
+
+          if (event.data.size === 0) {
+            console.warn('⚠️ Received empty data chunk');
+            return;
+          }
+
+          try {
+            // Filter out tiny chunks after header is captured
+            if (headerChunk && event.data.size < 1000) {
+              console.log(`🚫 Skipping tiny chunk: ${event.data.size} bytes`);
+              return;
+            }
+
+            if (!isHeaderCaptured) {
+              headerChunk = event.data;
+              isHeaderCaptured = true;
+              console.log(`📋 Header chunk captured: ${event.data.size} bytes, Type: ${event.data.type}`);
+              return;
+            } else {
+              console.log(`📦 Processing audio chunk: ${event.data.size} bytes`);
+
+              const chunkWithHeader = new Blob([headerChunk, event.data], {
+                type: event.data.type
+              });
+
+              await sendAudioChunk(chunkWithHeader);
+            }
+          } catch (error) {
+            console.error('❌ Error in ondataavailable:', error);
           }
         };
 
-        // Handle recording errors
         mediaRecorder.onerror = (event) => {
           console.error('❌ MediaRecorder error:', event.error);
-          statusElement.textContent = 'Recording error occurred';
+          statusElement.textContent = `Recording error: ${event.error?.message || 'Unknown error'}`;
         };
 
-        // Start recording with time slicing
-        mediaRecorder.start(CONFIG.CHUNK_DURATION); // Use CONFIG
+        mediaRecorder.onstart = () => {
+          console.log('🎬 MediaRecorder started');
+        };
+
+        mediaRecorder.onstop = () => {
+          console.log('🛑 MediaRecorder stopped');
+        };
+
+        mediaRecorder.onpause = () => {
+          console.log('⏸️ MediaRecorder paused');
+        };
+
+        mediaRecorder.onresume = () => {
+          console.log('▶️ MediaRecorder resumed');
+        };
+
+        console.log('🎬 Starting MediaRecorder...');
+        mediaRecorder.start();
+
+        const captureHeaderChunk = () => {
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            if (!isHeaderCaptured) {
+              console.log('📋 Requesting initial header chunk...');
+              mediaRecorder.requestData();
+              setTimeout(captureHeaderChunk, 50);
+            } else {
+              return;
+            }
+          } else {
+            console.error('❌ MediaRecorder not in recording state for header request');
+          }
+        }
+        setTimeout(captureHeaderChunk, 50);
+
+        const startRegularChunks = () => {
+          let attempts = 0;
+          const maxAttempts = 50; // 5 seconds max wait
+
+          const checkHeaderAndStart = () => {
+            attempts++;
+
+            if (isHeaderCaptured) {
+              console.log('📋 Header captured, starting regular chunk intervals');
+
+              sendChunkInterval = setInterval(() => {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                  console.log('📋 Requesting data chunk...');
+                  mediaRecorder.requestData();
+                } else {
+                  console.warn('⚠️ MediaRecorder not recording, clearing interval');
+                  if (sendChunkInterval) {
+                    clearInterval(sendChunkInterval);
+                    sendChunkInterval = null;
+                  }
+                }
+              }, CONFIG.CHUNK_DURATION);
+
+            } else if (attempts < maxAttempts) {
+              console.log(`⏳ Waiting for header... (attempt ${attempts}/${maxAttempts})`);
+              setTimeout(checkHeaderAndStart, 100);
+            } else {
+              console.error('❌ Header chunk timeout - forcing regular chunks anyway');
+              // Force stop recording and show error state
+              stopRecording()
+              deviceStatusElement.textContent = 'Error';
+              deviceStatusElement.style.color = '#f44336';
+            }
+          };
+
+          checkHeaderAndStart();
+        };
+
+        // Start regular chunk timing
+        setTimeout(startRegularChunks, 200);
 
         // Update UI
         isRecording = true;
         recordingStartTime = Date.now();
         updateButtonStates();
         recordingIndicator.classList.add('active');
-        statusElement.textContent = `Recording... (PCM ${CONFIG.SAMPLE_RATE}Hz)`; // Updated message
+        statusElement.textContent = `Recording... (${mimeType})`;
         deviceStatusElement.textContent = 'Recording';
         deviceStatusElement.style.color = '#ff4444';
 
         // Start timer
         recordingTimer = setInterval(updateRecordingTimer, 1000);
 
-        console.log(`✅ Recording started with PCM conversion (${CONFIG.CHUNK_DURATION}ms chunks)`);
+        console.log(`✅ Recording started with MIME type: ${mimeType}`);
 
       } catch (error) {
         console.error('❌ Error starting recording:', error);
-        let errorMessage = 'Error: Could not access microphone';
-
-        if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
-          errorMessage = 'Error: Selected device not available';
-          deviceStatusElement.textContent = 'Unavailable';
-          deviceStatusElement.style.color = '#f44336';
-        } else if (error.name === 'NotAllowedError') {
-          errorMessage = 'Error: Microphone permission denied';
-        }
-
-        statusElement.textContent = errorMessage;
-        alert(errorMessage + '. Please check permissions and device availability.');
       }
     }
 
     /**
-     * Stop continuous audio recording
+     * Stop continuous audio recording - UPDATED with better cleanup
      */
     function stopRecording() {
-      if (mediaRecorder && isRecording) {
-        mediaRecorder.stop();
+      console.log('🛑 Stopping recording...');
 
-        // Stop all audio tracks
-        if (audioStream) {
-          audioStream.getTracks().forEach(track => track.stop());
+      // Clear chunk interval first
+      if (sendChunkInterval) {
+        clearInterval(sendChunkInterval);
+        sendChunkInterval = null;
+        console.log('✅ Chunk interval cleared');
+      }
+
+      if (mediaRecorder && isRecording) {
+        // Check MediaRecorder state before stopping
+        console.log(`📊 MediaRecorder state before stop: ${mediaRecorder.state}`);
+
+        // Request final data before stopping
+        if (mediaRecorder.state === 'recording') {
+          console.log('📋 Requesting final data chunk...');
+          mediaRecorder.requestData();
         }
+
+        // Stop after a brief delay to allow final data
+        setTimeout(() => {
+          if (mediaRecorder && (mediaRecorder.state === 'recording' || mediaRecorder.state === 'paused')) {
+            mediaRecorder.stop();
+          }
+          audioStream.getTracks().forEach(track => {
+            track.stop();
+            console.log('🔇 Audio track stopped');
+          });
+          audioStream = null;
+          mediaRecorder = null;
+          headerChunk = null;
+          isHeaderCaptured = false;
+        }, 100);
 
         // Update UI
         isRecording = false;
@@ -735,16 +1015,22 @@
         // Reset upload status
         uploadStatusElement.textContent = 'Ready';
         uploadStatusElement.style.color = '#333';
+
+        console.log('✅ Recording stopped and state reset');
       }
     }
 
     /**
-     * Reset statistics when language changes
+     * Reset statistics when language changes - UPDATED to reset header state
      */
     function handleLanguageChange() {
       if (isRecording) {
         stopRecording();
       }
+
+      // Reset header state
+      headerChunk = null;
+      isHeaderCaptured = false;
 
       // Reset stats
       chunksSent = 0;
@@ -758,7 +1044,7 @@
     }
 
     /**
-     * Handle device selection change
+     * Handle device selection change - UPDATED to reset header state
      */
     function handleDeviceChange() {
       updateCurrentDeviceDisplay();
