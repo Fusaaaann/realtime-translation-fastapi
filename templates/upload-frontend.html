@@ -395,7 +395,7 @@
             const audioContext = new AudioContext({
               sampleRate: CONFIG.SAMPLE_RATE
             });
-            const audioBuffer = await audioContext.decodeAudioData(reader.result);
+            const audioBuffer = await audioContext.decodeAudioData(reader.result); // TODO: EncodingError: Unable to decode audio data
 
             console.log(`📊 Original: ${audioBuffer.sampleRate}Hz, ${audioBuffer.numberOfChannels}ch, ${audioBuffer.length} samples`);
 
@@ -460,14 +460,28 @@
         uploadStatusElement.textContent = 'Converting...';
         uploadStatusElement.style.color = '#ff9800';
 
-        // Convert to PCM first
-        const pcmBlob = await convertToPCM(audioBlob);
+        // const pcmBlob = await convertToPCM(audioBlob); // no conversion
 
         uploadStatusElement.textContent = 'Uploading...';
 
+        // Detect file extension from blob type
+        const getFileExtension = (mimeType) => {
+          const mimeToExt = {
+            'audio/webm': 'webm',
+            'audio/mp4': 'm4a',
+            'audio/mpeg': 'mp3',
+            'audio/wav': 'wav',
+            'audio/ogg': 'ogg'
+          };
+          return mimeToExt[mimeType] || 'webm'; // fallback to webm
+        };
+
+        const extension = getFileExtension(audioBlob.type);
+        const filename = `audio_chunk.${extension}`;
+
         const formData = new FormData();
         formData.append('sourceLanguage', getSelectedLanguage());
-        formData.append('audio_file', pcmBlob, 'audio_chunk.pcm'); // Changed filename and blob
+        formData.append('audio_file', audioBlob, filename);
         formData.append('sampleRate', CONFIG.SAMPLE_RATE.toString());
         formData.append('channels', CONFIG.CHANNELS.toString()); // Added
         formData.append('bitsPerSample', CONFIG.BITS_PER_SAMPLE.toString()); // Added
@@ -505,7 +519,7 @@
           throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
       } catch (error) {
-        console.error('❌ Error processing/sending audio chunk:', error);
+        console.error('❌ Error processing/sending audio chunk:', error); // TODO: EncodingError: Unable to decode audio data
         uploadStatusElement.textContent = 'Error';
         uploadStatusElement.style.color = '#f44336';
 

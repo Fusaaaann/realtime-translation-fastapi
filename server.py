@@ -1458,9 +1458,6 @@ def p_debug(t):
 async def publish_audio_upload(
     sourceLanguage: str = Form(...),
     audio_file: UploadFile = File(None),
-    sampleRate: int = Form(None),
-    channels: int = Form(1),  # ADD THIS - Default to mono
-    bitsPerSample: int = Form(16),  # ADD THIS - Default to 16-bit
     speech_id: str = Form(...),
 ):
     """
@@ -1470,108 +1467,44 @@ async def publish_audio_upload(
     global PUBLISH_SUCCEED_TIMES
     speech_id = f"publish-{speech_id}"
 
-    # ADD: Enhanced logging for audio configuration
     logger.info(f"Received upload request for speech_id: {speech_id}")
-    logger.info(f"Audio config - Language: {sourceLanguage}, Sample Rate: {sampleRate}, Channels: {channels}, Bits: {bitsPerSample}")
+    logger.info(f"Language: {sourceLanguage}")
     if audio_file:
-        logger.info(f"Audio file: {audio_file.filename} ({audio_file.size} bytes)")
+        logger.info(f"Audio file: {audio_file.filename} ({audio_file.size} bytes, content_type: {audio_file.content_type})")
 
-    if audio_file is None or sampleRate is None:
-        raise HTTPException(status_code=400, detail="audio_file and sampleRate are required in upload mode.")
+    if audio_file is None:
+        raise HTTPException(status_code=400, detail="audio_file is required in upload mode.")
 
     try:
-        # MODIFY: Enhanced audio data reading with logging
+        # Read uploaded audio data
         logger.info("Reading uploaded audio data...")
         audio_data = await audio_file.read()
         logger.info(f"Read {len(audio_data)} bytes of audio data")
-        source_sample_rate = sampleRate
 
-        # MODIFY: Enhanced numpy conversion with better error handling
-        logger.info("Converting audio data to numpy array...")
-        try:
-            # Use bitsPerSample to determine dtype
-            if bitsPerSample == 16:
-                audio_np = np.frombuffer(audio_data, dtype=np.int16)
-            elif bitsPerSample == 32:
-                audio_np = np.frombuffer(audio_data, dtype=np.int32)
-            elif bitsPerSample == 8:
-                audio_np = np.frombuffer(audio_data, dtype=np.uint8)
-            else:
-                logger.warning(f"Unsupported bits per sample: {bitsPerSample}, defaulting to 16-bit")
-                audio_np = np.frombuffer(audio_data, dtype=np.int16)
+        # Create buffer for STT API
+        audio_buffer = io.BytesIO(audio_data)
 
-            logger.info(f"Audio array shape: {audio_np.shape}")
-        except ValueError as e:
-            logger.error(f"Buffer conversion error: {e}")
-            logger.error(f"Buffer size: {len(audio_data)}, Element size: {np.dtype(np.int16).itemsize}")
-            raise HTTPException(status_code=400, detail=f"Invalid audio data format: {e}")
-
-        # MODIFY: Handle multi-channel audio
-        if len(audio_np.shape) == 1:
-            if channels > 1:
-                # Reshape for multi-channel
-                audio_np = audio_np.reshape(-1, channels)
-                # Convert to mono by averaging channels
-                audio_np = np.mean(audio_np, axis=1, dtype=audio_np.dtype).reshape(-1, 1)
-                logger.info(f"Converted {channels} channels to mono")
-            else:
-                audio_np = audio_np.reshape(-1, 1)
-
-        audio_duration = len(audio_np) / sampleRate
-        logger.info(f"Audio duration: {audio_duration:.2f} seconds")
-
-        # MODIFY: Enhanced resampling with logging
-        logger.info("Resampling audio to 16kHz...")
-        resampled_audio_np = resample_audio(audio_np, source_sample_rate, 16000)
-        logger.info(f"Resampled audio shape: {resampled_audio_np.shape}")
-
-        # MODIFY: Enhanced padding logic with logging
-        min_audio_duration = admin_config.get("min_audio_duration", 15)
-        current_duration = len(resampled_audio_np) / 16000
-        logger.info(f"Current duration: {current_duration:.2f}s, minimum required: {min_audio_duration}s")
-
-        if current_duration < min_audio_duration:
-            logger.info(f"Padding audio with silence to reach {min_audio_duration}s")
-            padded_audio_np = pad_audio_with_silence(
-                audio_np=resampled_audio_np,
-                current_sample_rate=16000,
-                current_duration_seconds=current_duration,
-                target_duration_seconds=min_audio_duration,
-            )
-        else:
-            padded_audio_np = resampled_audio_np
-
-        final_duration = len(padded_audio_np) / 16000
-        logger.info(f"Final audio duration: {final_duration:.2f}s")
-
-        # MODIFY: Enhanced WAV creation with logging
-        logger.info("Creating WAV file for STT API...")
+        # Use original filename or create one with proper extension
+        original_filename = audio_file.filename or "audio_chunk.webm"
+        content_type = audio_file.content_type or "audio/webm"
         timestamp = int(time.time())
-        audio_buffer = io.BytesIO()
 
-        with wave.open(audio_buffer, "wb") as wav_file:
-            wav_file.setnchannels(1)  # Always mono for STT
-            wav_file.setsampwidth(2)  # Always 16-bit for STT
-            wav_file.setframerate(16000)  # Always 16kHz for STT
-            wav_file.writeframes(padded_audio_np.tobytes())
-
-        # MODIFY: Enhanced debug file saving
+        # Debug file saving
         if random.random() < p_debug(PUBLISH_SUCCEED_TIMES):
-            audio_buffer.seek(0)
-            debug_filename = f"debug_audio_{timestamp}.wav"
+            debug_filename = f"debug_audio_{timestamp}_{original_filename}"
             with open(debug_filename, "wb") as f:
-                f.write(audio_buffer.getvalue())
+                f.write(audio_data)
             logger.info(f"Saved debug audio to {debug_filename}")
 
         audio_buffer.seek(0)
 
-        # MODIFY: Enhanced STT API call with better error handling
+        # Send directly to STT API with original content type
         logger.info("Sending audio to STT API...")
         try:
             stt_start_time = time.time()
             result = client.speech_to_text.convert(
                 model_id=STT_MODEL,
-                file=(f"input-file-{timestamp}.wav", audio_buffer, "audio/wav"),
+                file=(original_filename, audio_buffer, content_type),
                 timestamps_granularity="word",
             )
             stt_duration = time.time() - stt_start_time
@@ -1655,14 +1588,6 @@ async def publish_audio_upload(
             "timestamp": timestamp,
             "message": "Published transcription, translation, and TTS audio (upload mode).",
             "transcribed_text": transcribed_text,
-            "processing_stats": {
-                "original_duration": audio_duration,
-                "final_duration": final_duration,
-                "languages_processed": len(translations),
-                "channels": channels,
-                "bits_per_sample": bitsPerSample,
-                "original_sample_rate": sampleRate,
-            },
         }
 
     except Exception as e:
