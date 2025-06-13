@@ -124,59 +124,218 @@ DEFAULT_MESSAGES = {
 
 
 translation_prompt = {}
+special_terms = {}  # Single global dict for special terms
+
+# Configuration files
 PROMPT_FILE = os.path.join(os.path.dirname(__file__), "prompt.json")
+SPECIAL_TERMS_FILE = os.path.join(os.path.dirname(__file__), "special_terms.json")
 
 
 def convert_key(key_str):
-    # Convert "ENGLISH-CHINESE" into (Language.ENGLISH, Language.CHINESE)
+    """Convert "ENGLISH-CHINESE" into (Language.ENGLISH, Language.CHINESE)"""
     source, target = key_str.split("-")
-    return (getattr(Language, source.strip()), getattr(Language, target.strip()))
+    return (getattr(Language, source.strip().upper()), getattr(Language, target.strip().upper()))
+
+
+def convert_lang_pair_key(key_str):
+    """Convert "en-zh" into normalized format"""
+    source, target = key_str.upper().split("-")
+    return f"{source}-{target}"
 
 
 def load_prompt(file_path=PROMPT_FILE):
+    """Load translation prompts from JSON file"""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
+    except FileNotFoundError:
+        print(f"Prompt file {file_path} not found. Using defaults.")
+        return
     except Exception as e:
         print(f"Error loading prompt from {file_path}: {e}")
         return
 
-    # Assuming translation_prompt is a global dict where the keys are tuples.
     translation_prompt.clear()
     for key_str, prompt in data.items():
-        key = convert_key(key_str)
-        translation_prompt[key] = prompt
+        try:
+            key = convert_key(key_str)
+            translation_prompt[key] = prompt
+        except (AttributeError, ValueError) as e:
+            print(f"Invalid language key '{key_str}': {e}")
+            continue
 
-    print("Prompt reloaded successfully.")
+    print("Prompts loaded successfully.")
 
 
-class PromptFileEventHandler(FileSystemEventHandler):
-    def __init__(self, file_path=PROMPT_FILE):
-        self._file_path = file_path
+def load_special_terms(file_path=SPECIAL_TERMS_FILE):
+    """Load special terms from JSON file - simplified to single domain"""
+    global special_terms
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        print(f"Special terms file {file_path} not found. Using empty terms.")
+        special_terms = {}
+        return
+    except Exception as e:
+        print(f"Error loading special terms from {file_path}: {e}")
+        return
+
+    # Simplified: directly load the single domain structure
+    special_terms = data
+    print("Special terms loaded successfully.")
+
+
+def get_assembled_prompt(
+    source_lang: str, target_lang: str, prompt_type: str, source_text: str = "", surface_translation: str = "", special_terms_context: str = ""
+) -> str:
+    """
+    Assemble prompts for different translation passes.
+
+    Args:
+        source_lang: Source language code
+        target_lang: Target language code
+        prompt_type: 'single_pass', 'surface_translation', or 'refinement'
+        source_text: Original text to translate
+        surface_translation: Literal translation (for refinement pass)
+        special_terms_context: Special terms context string
+
+    Returns:
+        Assembled prompt string
+    """
+    # Get prompt template
+    key = (Language(source_lang.upper()), Language(target_lang.upper()))
+    prompt_data = translation_prompt.get(key, {})
+
+    # Default prompts if not found
+    default_prompts = {
+        "preprocessing": "",
+        "surface_translation": f"Provide literal translation from {source_lang} to {target_lang}: ${{text}}",
+        "refinement": f"Refine into natural {target_lang}: ${{surface_translation}}",
+        "single_pass": f"Translate from {source_lang} to {target_lang}: ${{text}}",
+    }
+
+    # Get the specific subprompt
+    subprompt = prompt_data.get(prompt_type, default_prompts[prompt_type])
+    preprocessing = prompt_data.get("preprocessing", "")
+
+    # Assemble the full prompt based on type
+    if prompt_type == "single_pass":
+        # Single-pass: preprocessing + single_pass + special terms
+        full_prompt = ""
+        if preprocessing:
+            full_prompt += preprocessing + "\n\n"
+        full_prompt += subprompt.replace("${text}", source_text)
+        if special_terms_context:
+            full_prompt += special_terms_context
+
+    elif prompt_type == "surface_translation":
+        # Surface translation: preprocessing + surface_translation + special terms
+        full_prompt = f"Translate {source_lang} to {target_lang} - LITERAL PASS:\n"
+        if preprocessing:
+            full_prompt += preprocessing + "\n"
+        full_prompt += subprompt
+        full_prompt += '\n\nExample: "I am going" → "Yo soy yendo" (literal, not "Yo voy")'
+        full_prompt += f"\n\nText: {source_text}"
+        if special_terms_context:
+            full_prompt += special_terms_context
+        full_prompt += "\n\nLiteral translation:"
+
+    elif prompt_type == "refinement":
+        # Refinement: refinement subprompt + context
+        full_prompt = f"REFINEMENT PASS - Make natural {target_lang}:\n\n"
+        full_prompt += f"Source: {source_text}\n"
+        full_prompt += f"Literal: {surface_translation}\n\n"
+        full_prompt += subprompt
+        if special_terms_context:
+            full_prompt += special_terms_context
+        full_prompt += "\n\nNatural translation:"
+
+    return full_prompt
+
+
+def get_terms_for_lang_pair(source_lang: str, target_lang: str) -> dict:
+    """
+    Get special terms for a specific language pair from global special_terms.
+    If source-target is not found, try target-source and reverse the key-value pairs.
+
+    Args:
+        source_lang: Source language code (e.g., 'en')
+        target_lang: Target language code (e.g., 'zh')
+
+    Returns:
+        Dictionary of special terms for the language pair
+    """
+    source_lang = source_lang.upper()
+    target_lang = target_lang.upper()
+
+    # Try direct lookup first
+    lang_pair_key = f"{source_lang}-{target_lang}"
+    if lang_pair_key in special_terms:
+        return special_terms[lang_pair_key]
+
+    # Try reverse lookup if direct not found
+    reverse_lang_pair_key = f"{target_lang}-{source_lang}"
+    if reverse_lang_pair_key in special_terms:
+        # Reverse the key-value pairs
+        reversed_terms = {value: key for key, value in special_terms[reverse_lang_pair_key].items()}
+        return reversed_terms
+
+    # Return empty dict if neither direction is found
+    return {}
+
+
+class ConfigFileEventHandler(FileSystemEventHandler):
+    def __init__(self, prompt_file=PROMPT_FILE, terms_file=SPECIAL_TERMS_FILE):
+        self._prompt_file = prompt_file
+        self._terms_file = terms_file
 
     def on_modified(self, event):
-        # When the file is modified, reload the prompt.
-        if event.src_path.endswith(os.path.basename(self._file_path)):
-            print(f"{self._file_path} has been modified. Reloading prompt...")
-            load_prompt(self._file_path)
+        if event.src_path.endswith(os.path.basename(self._prompt_file)):
+            print(f"{self._prompt_file} modified. Reloading prompts...")
+            load_prompt(self._prompt_file)
+        elif event.src_path.endswith(os.path.basename(self._terms_file)):
+            print(f"{self._terms_file} modified. Reloading special terms...")
+            load_special_terms(self._terms_file)
 
 
-def start_prompt_watcher(file_path=PROMPT_FILE):
-    """
-    Start watching the prompt JSON file for changes in a separate thread.
-    """
-    event_handler = PromptFileEventHandler(file_path)
+def start_config_watcher(prompt_file=PROMPT_FILE, terms_file=SPECIAL_TERMS_FILE):
+    """Start watching both config files for changes"""
+    event_handler = ConfigFileEventHandler(prompt_file, terms_file)
     observer = Observer()
-    directory = os.path.dirname(os.path.abspath(file_path))
-    observer.schedule(event_handler, directory, recursive=False)
+
+    # Watch directories containing the files
+    prompt_dir = os.path.dirname(os.path.abspath(prompt_file))
+    terms_dir = os.path.dirname(os.path.abspath(terms_file))
+
+    observer.schedule(event_handler, prompt_dir, recursive=False)
+    if terms_dir != prompt_dir:
+        observer.schedule(event_handler, terms_dir, recursive=False)
+
     observer.start()
-    print(f"Started watching {file_path} for changes.")
+    print("Started watching config files for changes.")
 
     thread = threading.Thread(target=observer.join, daemon=True)
     thread.start()
     return observer
 
 
-# When the module is imported, load prompt and start the watcher.
+# Simplified utility functions
+def create_special_terms_dict(*term_pairs, validate: bool = True) -> dict:
+    """Helper function to create special terms dictionary with validation"""
+    terms_dict = dict(term_pairs)
+
+    if validate:
+        for source, target in terms_dict.items():
+            if not isinstance(source, str) or not isinstance(target, str):
+                raise ValueError(f"Terms must be strings: {source} → {target}")
+            if not source.strip() or not target.strip():
+                raise ValueError(f"Terms cannot be empty: '{source}' → '{target}'")
+
+    return terms_dict
+
+
 load_prompt(PROMPT_FILE)
-start_prompt_watcher(PROMPT_FILE)
+load_special_terms(SPECIAL_TERMS_FILE)
+start_config_watcher(PROMPT_FILE, SPECIAL_TERMS_FILE)

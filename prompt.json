@@ -1,14 +1,74 @@
 {
-  "ENGLISH-CHINESE": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from English to Chinese. Provide only the final translated text:\n\n${text}",
-  "ENGLISH-VIETNAMESE": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from English to Vietnamese. Provide only the final translated text:\n\n${text}",
-  "ENGLISH-THAI": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from English to Thai. Provide only the final translated text:\n\n${text}",
-  "CHINESE-ENGLISH": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from Chinese to English. Provide only the final translated text:\n\n${text}",
-  "CHINESE-VIETNAMESE": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from Chinese to Vietnamese. Provide only the final translated text:\n\n${text}",
-  "CHINESE-THAI": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from Chinese to Thai. Provide only the final translated text:\n\n${text}",
-  "VIETNAMESE-ENGLISH": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from Vietnamese to English. Provide only the final translated text:\n\n${text}",
-  "VIETNAMESE-CHINESE": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from Vietnamese to Chinese. Provide only the final translated text:\n\n${text}",
-  "VIETNAMESE-THAI": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from Vietnamese to Thai. Provide only the final translated text:\n\n${text}",
-  "THAI-ENGLISH": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from Thai to English. Provide only the final translated text:\n\n${text}",
-  "THAI-CHINESE": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from Thai to Chinese. Provide only the final translated text:\n\n${text}",
-  "THAI-VIETNAMESE": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies. Then, translate the cleaned text accurately from Thai to Vietnamese. Provide only the final translated text:\n\n${text}"
+  "ENGLISH-CHINESE": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from English to Chinese. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct Chinese while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from English to Chinese. Provide only the final translated text."
+  },
+  "ENGLISH-VIETNAMESE": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from English to Vietnamese. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct Vietnamese while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from English to Vietnamese. Provide only the final translated text."
+  },
+  "ENGLISH-THAI": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from English to Thai. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct Thai while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from English to Thai. Provide only the final translated text."
+  },
+  "CHINESE-ENGLISH": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from Chinese to English. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct English while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from Chinese to English. Provide only the final translated text."
+  },
+  "CHINESE-VIETNAMESE": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from Chinese to Vietnamese. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct Vietnamese while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from Chinese to Vietnamese. Provide only the final translated text."
+  },
+  "CHINESE-THAI": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from Chinese to Thai. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct Thai while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from Chinese to Thai. Provide only the final translated text."
+  },
+  "VIETNAMESE-ENGLISH": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from Vietnamese to English. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct English while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from Vietnamese to English. Provide only the final translated text."
+  },
+  "VIETNAMESE-CHINESE": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from Vietnamese to Chinese. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct Chinese while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from Vietnamese to Chinese. Provide only the final translated text."
+  },
+  "VIETNAMESE-THAI": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from Vietnamese to Thai. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct Thai while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from Vietnamese to Thai. Provide only the final translated text."
+  },
+  "THAI-ENGLISH": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from Thai to English. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct English while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from Thai to English. Provide only the final translated text."
+  },
+  "THAI-CHINESE": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from Thai to Chinese. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct Chinese while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from Thai to Chinese. Provide only the final translated text."
+  },
+  "THAI-VIETNAMESE": {
+    "preprocessing": "The following text was transcribed using a TTS model and may contain transcription errors or formatting issues. First, correct any transcription errors, remove unnecessary filler words, repetitions, or formatting inconsistencies.",
+    "surface_translation": "Provide word-for-word/phrase-for-phrase translation from Thai to Vietnamese. Focus on literal meaning, ignore grammar/naturalness.",
+    "refinement": "Transform the literal translation into natural, grammatically correct Vietnamese while preserving the original meaning.",
+    "single_pass": "Translate the cleaned text accurately from Thai to Vietnamese. Provide only the final translated text."
+  }
 }

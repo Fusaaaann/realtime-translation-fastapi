@@ -246,7 +246,8 @@
   </div>
   <script>
     const CONFIG = {
-      CHUNK_DURATION: 5000, // 5 seconds per chunk
+      INTERACTIVELY_SHORTER_LENGTH: parseInt("{{ interactively_shorter_length }}", 5000), // 5000 ms
+      CHUNK_DURATION: parseInt("{{ chunk_duration }}", 5000), // 5000 ms per chunk
       SAMPLE_RATE: 16000,
       CHANNELS: 1,
       BITS_PER_SAMPLE: 16,
@@ -805,6 +806,7 @@
 
         // Determine best supported MIME type
         const supportedTypes = [
+          'audio/ogg', 
           'audio/webm;codecs=opus',
           'audio/webm',
           'audio/mp4',
@@ -835,6 +837,7 @@
           }
 
           try {
+            // much thanks to https://elixirforum.com/t/how-to-stream-audio-chunks-from-the-browser-to-the-server/66091/5
             // Filter out tiny chunks after header is captured
             if (headerChunk && event.data.size < 1000) {
               console.log(`🚫 Skipping tiny chunk: ${event.data.size} bytes`);
@@ -902,6 +905,7 @@
         const startRegularChunks = () => {
           let attempts = 0;
           const maxAttempts = 50; // 5 seconds max wait
+          let isFirstChunk = true;
 
           const checkHeaderAndStart = () => {
             attempts++;
@@ -909,18 +913,26 @@
             if (isHeaderCaptured) {
               console.log('📋 Header captured, starting regular chunk intervals');
 
-              sendChunkInterval = setInterval(() => {
-                if (mediaRecorder && mediaRecorder.state === 'recording') {
-                  console.log('📋 Requesting data chunk...');
-                  mediaRecorder.requestData();
-                } else {
-                  console.warn('⚠️ MediaRecorder not recording, clearing interval');
-                  if (sendChunkInterval) {
-                    clearInterval(sendChunkInterval);
-                    sendChunkInterval = null;
+              const scheduleNextChunk = () => {
+                const chunkDuration = isFirstChunk 
+                  ? (CONFIG.INTERACTIVELY_SHORTER_LENGTH)
+                  : CONFIG.CHUNK_DURATION;
+                
+                console.log(`⏰ Scheduling ${isFirstChunk ? 'first' : 'subsequent'} chunk in ${chunkDuration}ms`);
+                
+                setTimeout(() => {
+                  if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    console.log('📋 Requesting data chunk...');
+                    mediaRecorder.requestData();
+                    isFirstChunk = false;
+                    scheduleNextChunk(); // Schedule the next chunk
+                  } else {
+                    console.warn('⚠️ MediaRecorder not recording, stopping chunk scheduling');
                   }
-                }
-              }, CONFIG.CHUNK_DURATION);
+                }, chunkDuration);
+              };
+
+              scheduleNextChunk(); // Start the scheduling
 
             } else if (attempts < maxAttempts) {
               console.log(`⏳ Waiting for header... (attempt ${attempts}/${maxAttempts})`);

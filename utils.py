@@ -99,6 +99,7 @@ class SessionArchiver:
         transcribed_text: str,
         source_language: str,
         timestamp: float,
+        admin_config: dict,
         audio_data: bytes = None,
         translations: dict = None,
         tts_audio_data: dict = None,
@@ -118,10 +119,10 @@ class SessionArchiver:
             }
 
             self.session_data.append(entry)
-
+            # TODO: save whole speece, not each piece
             # Save original audio file if provided
             if audio_data:
-                audio_filename = f"{self.session_id}_{speech_id}_{int(timestamp)}_original.wav"
+                audio_filename = f"{self.session_id}_{speech_id}_{int(timestamp)}_original.wav"  # TODO: match original format, not assuming it as wav
                 audio_path = os.path.join(self.archive_dir, "audio", audio_filename)
                 try:
                     with open(audio_path, "wb") as f:
@@ -147,7 +148,7 @@ class SessionArchiver:
 
             # Periodically save session data to JSON
             if len(self.session_data) % 10 == 0:  # Save every 10 entries
-                await self._save_session_data()
+                await self._save_session_data(admin_config)
 
     async def _save_session_data(self, admin_config):
         """Save session data to JSON file."""

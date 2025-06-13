@@ -25,7 +25,7 @@ from fastapi.templating import Jinja2Templates
 import uvicorn
 import openai
 
-from i18n import DEFAULT_MESSAGES, LOCALIZED_MESSAGES, Language, translation_prompt
+from i18n import DEFAULT_MESSAGES, LOCALIZED_MESSAGES, Language, get_terms_for_lang_pair, get_assembled_prompt
 from utils import ConversationCache, SessionArchiver
 
 ###############################################################################
@@ -46,7 +46,7 @@ default_config = {
     "admin_token": "",  # admin token is read-only via config endpoint.
     "poll_interval": 10,  # seconds between audio recordings
     "first_record_seconds": 5,  # actual recording duration for better interactivity
-    "min_audio_duration": 15,  # minimum duration required by the STT API
+    "min_audio_duration": 15,  # minimum duration for better context recall
 }
 
 API_KEY = secrets.token_urlsafe(12)[:16]
@@ -308,10 +308,9 @@ def convert_multichannel_to_mono(audio_np: np.ndarray, channels: int):
     return mono_audio
 
 
-def translate_text(source_text: str, source_lang: str, target_lang: str) -> str:
+def translate_text(source_text: str, source_lang: str, target_lang: str, enable_two_pass: bool = True) -> str:
     """
-    Translates text from source language to target language, maintaining conversation context
-    for better quality and noise word reduction.
+    Translate text using assembled prompts from subprompt components.
     """
     # Initialize conversation history if it doesn't exist
     if not hasattr(translate_text, "conversation_history"):
@@ -324,35 +323,99 @@ def translate_text(source_text: str, source_lang: str, target_lang: str) -> str:
     if source_lang.upper() == target_lang.upper():
         return source_text
 
-    # Get the prompt template for this language pair
-    key = (Language(source_lang.upper()), Language(target_lang.upper()))
-    prompt_template = translation_prompt.get(key, f"Translate the following text from {source_lang} to {target_lang}: ${{text}}")
+    # Get special terms from global variable
+    lang_pair_terms = get_terms_for_lang_pair(source_lang, target_lang)
+
+    # Prepare special terms context
+    special_terms_context = ""
+    if lang_pair_terms:
+        special_terms_context = "\n\nSpecial terms (preserve exactly, adapt grammar only if needed):\n"
+        for source_term, target_term in lang_pair_terms.items():
+            special_terms_context += f"'{source_term}' → '{target_term}'\n"
 
     # Construct messages for the API call
-    messages = [{"role": "system", "content": "You are a professional translator. Maintain consistency with previous translations."}]
+    messages = [{"role": "system", "content": "Professional translator. Maintain consistency with previous work."}]
 
-    # Add conversation history as context in the messages
+    # Add conversation history as context
     if translate_text.conversation_history[lang_pair_key]:
-        history_context = "Previous conversation context:\n"
-        for i, prev_text in enumerate(translate_text.conversation_history[lang_pair_key][-5:]):
-            history_context += f"[{i+1}] {prev_text}\n"
+        recent_history = translate_text.conversation_history[lang_pair_key][-3:]
+        history_context = "Recent translations:\n" + "\n".join([f"{i+1}. {hist}" for i, hist in enumerate(recent_history)])
         messages.append({"role": "user", "content": history_context})
-        messages.append({"role": "assistant", "content": "I'll maintain consistency with these previous translations."})
+        messages.append({"role": "assistant", "content": "I'll maintain consistency."})
 
-    # Add the current translation request
-    translation_request = prompt_template.replace("${text}", source_text)
-    messages.append({"role": "user", "content": translation_request})
+    if enable_two_pass:
+        # TWO-PASS TRANSLATION APPROACH using assembled prompts
 
-    response = openai_client.chat.completions.create(model="gpt-4.1", messages=messages)
+        # PASS 1: Surface translation
+        surface_prompt = get_assembled_prompt(
+            source_lang, target_lang, "surface_translation", source_text=source_text, special_terms_context=special_terms_context
+        )
 
-    translated_text = response.choices[0].message.content.strip()
+        messages.append({"role": "user", "content": surface_prompt})
+        response_1 = openai_client.chat.completions.create(model="gpt-4.1", messages=messages)
+        surface_translation = response_1.choices[0].message.content.strip()
 
-    # Update conversation history (keep last 10 exchanges)
-    translate_text.conversation_history[lang_pair_key].append(f"Source: {source_text}\nTranslation: {translated_text}")
-    if len(translate_text.conversation_history[lang_pair_key]) > 10:
+        # PASS 2: Refinement
+        refinement_prompt = get_assembled_prompt(
+            source_lang,
+            target_lang,
+            "refinement",
+            source_text=source_text,
+            surface_translation=surface_translation,
+            special_terms_context=special_terms_context,
+        )
+
+        messages.append({"role": "assistant", "content": surface_translation})
+        messages.append({"role": "user", "content": refinement_prompt})
+
+        response_2 = openai_client.chat.completions.create(model="gpt-4.1", messages=messages)
+        translated_text = response_2.choices[0].message.content.strip()
+
+        # Compact history entry
+        history_entry = f"'{source_text}' → Literal: '{surface_translation}' → Final: '{translated_text}'"
+
+    else:
+        # SINGLE-PASS TRANSLATION using assembled prompt
+        single_pass_prompt = get_assembled_prompt(
+            source_lang, target_lang, "single_pass", source_text=source_text, special_terms_context=special_terms_context
+        )
+
+        messages.append({"role": "user", "content": single_pass_prompt})
+
+        response = openai_client.chat.completions.create(model="gpt-4.1", messages=messages)
+        translated_text = response.choices[0].message.content.strip()
+
+        # Compact history entry
+        history_entry = f"'{source_text}' → '{translated_text}'"
+
+    # Update conversation history (keep last 8 exchanges)
+    translate_text.conversation_history[lang_pair_key].append(history_entry)
+    if len(translate_text.conversation_history[lang_pair_key]) > 8:
         translate_text.conversation_history[lang_pair_key].pop(0)
 
     return translated_text
+
+
+# Additional utility function for debugging/analysis
+def get_translation_history(source_lang: str, target_lang: str, limit: int = 5) -> list:
+    """
+    Get recent translation history for a language pair.
+
+    Args:
+        source_lang: Source language code
+        target_lang: Target language code
+        limit: Maximum number of recent translations to return
+
+    Returns:
+        List of recent translation history entries
+    """
+    if not hasattr(translate_text, "conversation_history"):
+        return []
+
+    lang_pair_key = f"{source_lang.upper()}-{target_lang.upper()}"
+    history = translate_text.conversation_history.get(lang_pair_key, [])
+
+    return history[-limit:] if history else []
 
 
 conversation_cache = ConversationCache()
@@ -1333,6 +1396,7 @@ async def local_audio_source_processor():
                             transcribed_text=transcribed_text,
                             source_language=DEFAULT_SOURCE_LANGUAGE,
                             timestamp=timestamp,
+                            admin_config=admin_config,
                             audio_data=original_audio_data,  # Original recording without padding
                             translations=translations,
                             tts_audio_data=tts_audio_data,  # All TTS audio files
@@ -1549,24 +1613,6 @@ async def publish_audio_upload(
         if detected_format != expected_format and detected_format != "unknown":
             logger.warning(f"⚠️ Format mismatch: expected {expected_format}, detected {detected_format}")
 
-        # === VERIFICATION POINT 3: File Magic Detection ===
-        import puremagic
-
-        try:
-            detected_mime = puremagic.from_stream(audio_data, mime=True)
-            detected_type = puremagic.from_stream(audio_data)
-            logger.info(f"🔮 Magic detection - MIME: {detected_mime}, Type: {detected_type}")
-
-            if detected_mime != content_type:
-                logger.warning(f"⚠️ MIME type mismatch: received {content_type}, detected {detected_mime}")
-        except Exception as magic_error:
-            logger.warning(f"⚠️ Magic detection failed: {magic_error}")
-        import hashlib
-
-        # === VERIFICATION POINT 4: Data Integrity Check ===
-        data_hash = hashlib.md5(audio_data).hexdigest()
-        logger.info(f"🔐 Data MD5 hash: {data_hash}")
-
         # Debug file saving
         if random.random() < p_debug(PUBLISH_SUCCEED_TIMES):
             debug_filename = f"debug_audio_{timestamp}_{original_filename}"
@@ -1652,6 +1698,7 @@ async def publish_audio_upload(
             transcribed_text=transcribed_text,
             source_language=sourceLanguage,
             timestamp=timestamp,
+            admin_config=admin_config,
             audio_data=audio_data,  # Original uploaded audio
             translations=translations,
             tts_audio_data=tts_audio_data,  # All TTS audio files
@@ -2165,6 +2212,8 @@ async def serve_upload(
     context = {
         "request": request,
         "api_base_url": base_url,
+        "interactively_shorter_length": admin_config.get("first_record_seconds"),
+        "chunk_duration": admin_config.get("min_audio_duration"),
         "languages": languages,
         "api_key": api_key,
     }
