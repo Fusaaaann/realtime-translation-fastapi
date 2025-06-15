@@ -36,7 +36,7 @@ brew install portaudio
 ```
 
 4. **Set up configuration**
-Create `admin_config.json` with your API keys:
+Create `admin_config.json` with your API keys to access third party services:
 ```json
 {
     "elevenlabs_api_key": "your_elevenlabs_api_key",
@@ -123,17 +123,6 @@ The server will start on `http://localhost:9001`
 - Chinese (Simplified)
 - Vietnamese
 - Thai
-- Spanish
-- French
-- German
-- Japanese
-- Korean
-- Portuguese
-- Russian
-- Arabic
-- Hindi
-- Italian
-- Dutch
 
 ## Architecture
 
@@ -165,14 +154,18 @@ The server will start on `http://localhost:9001`
 
 ```
 ├── app.py                 # Main application
+├── evals.py               # Evaluation application
 ├── i18n.py               # Internationalization and translation prompts
 ├── utils.py              # Utility classes (ConversationCache, SessionArchiver)
 ├── templates/            # HTML templates
 │   ├── index.html
 │   ├── streaming-frontend.html
+│   ├── eval.html
 │   ├── upload-frontend.html
 │   └── admin-frontend.html
 ├── static/               # Static assets
+├── prompt.json           # Translation Prompts
+├── special_terms.json    # Example of domain-specific terms used in translation
 └── admin_config.json     # Configuration file
 ```
 
