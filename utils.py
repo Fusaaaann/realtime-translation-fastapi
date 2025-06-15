@@ -171,7 +171,7 @@ class SessionArchiver:
 
     async def finalize_session(self, admin_config):
         """Finalize and save the complete session data."""
-        await self._save_session_data()
+        await self._save_session_data(admin_config)
         logger.info(f"Finalized session {self.session_id} with {len(self.session_data)} entries")
 
     def get_session_stats(self) -> dict:

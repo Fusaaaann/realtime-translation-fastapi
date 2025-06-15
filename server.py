@@ -662,7 +662,7 @@ class ContinuousAudioRecorder:
             # If device_id is None or invalid, use the default input device
             if device_info is None:
                 default_device = sd.query_devices(kind="input")
-                self.device_id["index"]
+                self.device_id = default_device["index"]
                 logger.info(f"Using default input device: {default_device['name']}")
 
             # Wait for the _running flag to be set by start() method
@@ -1096,7 +1096,7 @@ audio_processor_task = None
 CONSUMER_ID = "main_processor"  # Unique ID for the main audio processing consumer
 
 
-def initialize_audio_recorder(sample_rate=16000, device_id=None, buffer_seconds=30):
+def initialize_audio_recorder(sample_rate=16000, device_id=None, buffer_seconds=30, **kwargs):
     """
     Initialize the global continuous audio recorder.
 
