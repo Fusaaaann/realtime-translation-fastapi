@@ -52,11 +52,55 @@ Create `admin_config.json` with your API keys to access third party services:
 
 ### Starting the Server
 
+You can start the server in several ways:
+
+#### Option 1: Direct Python execution
 ```bash
 python app.py
 ```
 
-The server will start on `http://localhost:9001`
+#### Option 2: Using uvicorn directly
+```bash
+uvicorn app:app --host 0.0.0.0 --port 9001 --reload
+```
+
+#### Option 3: Production deployment with uvicorn
+```bash
+# Basic production setup
+uvicorn app:app --host 0.0.0.0 --port 9001 --workers 1
+
+# With SSL/TLS support
+uvicorn app:app --host 0.0.0.0 --port 9001 --ssl-keyfile key.pem --ssl-certfile cert.pem
+
+# With custom configuration
+uvicorn app:app --host 0.0.0.0 --port 9001 --access-log --log-level info
+```
+
+#### Option 4: Using a process manager (recommended for production)
+```bash
+# Using gunicorn with uvicorn workers
+gunicorn app:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:9001
+
+# Using systemd service
+sudo systemctl start translation-server
+```
+
+The server will start on `http://localhost:9001` (or your specified host/port)
+
+### Command Line Options
+
+When using uvicorn directly, you can customize the server with these options:
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--host` | Host to bind to | `--host 0.0.0.0` |
+| `--port` | Port to bind to | `--port 8000` |
+| `--reload` | Auto-reload on code changes (development) | `--reload` |
+| `--workers` | Number of worker processes | `--workers 4` |
+| `--ssl-keyfile` | SSL key file path | `--ssl-keyfile key.pem` |
+| `--ssl-certfile` | SSL certificate file path | `--ssl-certfile cert.pem` |
+| `--log-level` | Logging level | `--log-level debug` |
+| `--access-log` | Enable access logging | `--access-log` |
 
 ### Operating Modes
 
@@ -64,11 +108,13 @@ The server will start on `http://localhost:9001`
 - Automatically captures audio from your microphone
 - Processes audio at regular intervals
 - Ideal for live presentations or meetings
+- **Note**: Only use 1 worker process in this mode due to audio device exclusivity
 
 #### 2. Upload Mode
 - Accepts audio uploads via API
 - Manual control over when audio is processed
 - Suitable for batch processing or custom integrations
+- Can use multiple workers for better performance
 
 ### Web Interfaces
 
@@ -76,6 +122,67 @@ The server will start on `http://localhost:9001`
 2. **Streaming Interface**: `http://localhost:9001/?streaming=true` - Real-time streaming view
 3. **Upload Interface**: `http://localhost:9001/upload?api_key=YOUR_API_KEY` - Manual audio upload
 4. **Admin Panel**: `http://localhost:9001/admin?admin_token=YOUR_TOKEN` - System configuration
+
+### Production Deployment
+
+For production environments, consider:
+
+1. **Reverse Proxy Setup** (nginx example):
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    location / {
+        proxy_pass http://127.0.0.1:9001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # For Server-Sent Events
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_set_header Connection '';
+        proxy_http_version 1.1;
+        chunked_transfer_encoding off;
+    }
+}
+```
+
+2. **Environment Variables**:
+```bash
+export UVICORN_HOST=0.0.0.0
+export UVICORN_PORT=9001
+export UVICORN_LOG_LEVEL=info
+```
+
+3. **Docker Deployment**:
+```dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+EXPOSE 9001
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9001"]
+```
+
+### Development vs Production
+
+#### Development
+```bash
+# Auto-reload on changes, detailed logging
+uvicorn app:app --host 127.0.0.1 --port 9001 --reload --log-level debug
+```
+
+#### Production
+```bash
+# Optimized for performance and stability
+uvicorn app:app --host 0.0.0.0 --port 9001 --workers 1 --log-level info --access-log
+```
+
+**Important**: Always use `--workers 1` when using local audio source mode, as audio devices cannot be shared between processes.
 
 ## API Endpoints
 
