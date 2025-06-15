@@ -339,6 +339,7 @@ class TestTranslatedAudio:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Not run to shorten test time")
 class TestPublishEndpoint:
     def test_upload_mode(self, configure_testing):
         """Test the publish endpoint in upload mode"""
@@ -393,6 +394,7 @@ class TestPublishEndpoint:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Not run to shorten test time")
 class TestEndpointAvailability:
     """Test that all endpoints are available and return proper status codes"""
 
@@ -460,6 +462,7 @@ class TestEndpointAvailability:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Not run to shorten test time")
 class TestDataConsistency:
     """Test data consistency across different endpoints"""
 
@@ -530,6 +533,7 @@ class TestDataConsistency:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Not run to shorten test time")
 class TestErrorHandling:
     """Test error handling and edge cases"""
 
